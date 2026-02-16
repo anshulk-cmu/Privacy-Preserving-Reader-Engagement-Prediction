@@ -28,7 +28,6 @@ Usage:
 import argparse
 import json
 import sys
-import time
 from pathlib import Path
 
 import matplotlib
@@ -186,7 +185,9 @@ def plot_auc_degradation(all_results: dict, output_dir: Path):
     print(f"    Saved auc_degradation.png")
 
 
-def plot_certified_radii(results: list, nn_info: dict, model_name: str, output_dir: Path):
+def plot_certified_radii(results: list, nn_info: dict, model_name: str,
+                         representations: np.ndarray, w: np.ndarray, b: float,
+                         output_dir: Path):
     """Plot 4: Certified radius distributions at selected sigma values."""
     selected_sigmas = [s for s in [0.1, 0.5, 1.0, 2.0] if any(r["sigma"] == s for r in results)]
 
@@ -194,35 +195,38 @@ def plot_certified_radii(results: list, nn_info: dict, model_name: str, output_d
     if n_plots == 0:
         return
 
-    fig, axes = plt.subplots(1, n_plots, figsize=(5 * n_plots, 4))
+    fig, axes = plt.subplots(1, n_plots, figsize=(5 * n_plots, 4.5))
     if n_plots == 1:
         axes = [axes]
 
-    median_nn = nn_info.get("median", 0)
+    # Use euclidean NN distances for comparison with L2 certified radii
+    median_nn_l2 = nn_info.get("euclidean", {}).get("median", nn_info.get("median", 0))
     label_upper = model_name.upper()
 
     for ax, sigma in zip(axes, selected_sigmas):
         result = next(r for r in results if r["sigma"] == sigma)
         cert = result["certification"]
 
-        # Recompute radii for histogram (not stored in sweep)
-        # Use the summary stats instead
-        ax.text(0.5, 0.5,
-                f"σ = {sigma}\n\n"
-                f"Mean R = {cert['mean_radius']:.3f}\n"
-                f"Median R = {cert['median_radius']:.3f}\n"
-                f"Certified: {cert['frac_certified']*100:.1f}%\n"
-                f"R > 1.0: {cert['frac_above_1']*100:.1f}%\n"
-                f"R > 2.0: {cert['frac_above_2']*100:.1f}%\n"
-                f"R > 5.0: {cert['frac_above_5']*100:.1f}%\n\n"
-                f"Median NN dist: {median_nn:.3f}",
-                transform=ax.transAxes, fontsize=10, va="center", ha="center",
-                fontfamily="monospace",
-                bbox=dict(boxstyle="round", facecolor="lightyellow", alpha=0.8))
-        ax.set_title(f"σ = {sigma}", fontsize=11, fontweight="bold")
-        ax.axis("off")
+        # Recompute radii for histogram
+        radii_data = compute_certified_radii(representations, w, b, sigma)
+        radii = radii_data["radii"]
 
-    fig.suptitle(f"Certified Radii Summary — {label_upper}", fontsize=13, fontweight="bold")
+        ax.hist(radii, bins=50, color="teal", alpha=0.7, edgecolor="white", density=True)
+        if median_nn_l2 > 0:
+            ax.axvline(x=median_nn_l2, color="red", linestyle="--", linewidth=2,
+                       label=f"Median NN (L2)={median_nn_l2:.2f}")
+        ax.axvline(x=cert["median_radius"], color="orange", linestyle="-", linewidth=2,
+                   label=f"Median R={cert['median_radius']:.2f}")
+
+        ax.set_xlabel("Certified Radius (L2)")
+        ax.set_ylabel("Density")
+        ax.set_title(f"σ = {sigma}", fontsize=11, fontweight="bold")
+        ax.legend(fontsize=7)
+        ax.grid(True, alpha=0.3)
+
+    fig.suptitle(f"Certified Radius Distribution — {label_upper}\n"
+                 f"Red dashed = median L2 NN distance between users",
+                 fontsize=12, fontweight="bold")
     plt.tight_layout()
     fig.savefig(output_dir / "certified_radii.png", dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -380,7 +384,9 @@ def plot_smoothing_summary(all_results: dict, baseline: dict, nn_info_all: dict,
         lines.append(f"  Clean Re-id Top1:{clean['privacy']['top_k_accuracy']['1']*100:.2f}%")
         lines.append(f"  Clean Lift:      "
                       f"{clean['privacy']['top_k_accuracy']['1']/random_top1:.0f}x")
-        lines.append(f"  NN median dist:  {nn_median:.4f}")
+        nn_median_l2 = nn_info_all.get(model_name, {}).get("euclidean", {}).get("median", 0)
+        lines.append(f"  NN median (cos):  {nn_median:.4f}")
+        lines.append(f"  NN median (L2):   {nn_median_l2:.4f}")
         lines.append("")
 
         # Find crossover points
@@ -636,6 +642,12 @@ def run_model(model_name: str, model_dir: Path, output_subdir: Path) -> dict:
             "mc_n_samples": MC_N_SAMPLES,
             "mc_alpha": MC_ALPHA,
         },
+        # Raw numpy data for plotting (not serialized to JSON)
+        "_raw": {
+            "representations": val_reprs,
+            "w": w,
+            "b": b,
+        },
     }
 
     return model_results
@@ -706,13 +718,18 @@ def main():
         model_dir = OUTPUT_DIR / model_name
         model_dir.mkdir(parents=True, exist_ok=True)
         nn_info = nn_info_all.get(model_name, {})
+        raw = all_results[model_name].get("_raw", {})
         print(f"\n  {model_name.upper()} plots...")
-        plot_certified_radii(all_results[model_name]["sweep"], nn_info,
-                             model_name, model_dir)
+        plot_certified_radii(
+            all_results[model_name]["sweep"], nn_info,
+            model_name, raw.get("representations", np.array([])),
+            raw.get("w", np.array([])), raw.get("b", 0.0),
+            model_dir,
+        )
         plot_recommended_detail(all_results[model_name]["sweep"], baseline,
                                 nn_info, model_name, model_dir)
 
-    # Save all results to JSON
+    # Save all results to JSON (exclude _raw numpy data)
     save_results = {}
     for model_name, res in all_results.items():
         model_save = {

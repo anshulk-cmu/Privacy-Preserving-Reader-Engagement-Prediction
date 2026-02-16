@@ -32,7 +32,6 @@ Reference:
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 from scipy.stats import norm, beta as beta_dist
@@ -225,15 +224,19 @@ def compute_nn_distances(
     distances. Returns the distribution of 1-NN distances — the
     critical reference for calibrating sigma.
 
+    Computes distances in both the requested metric AND euclidean,
+    since certified radii (Cohen et al.) are L2 while re-identification
+    may use cosine distance. Both are needed for sigma calibration.
+
     Args:
         user_ids: (N,) user IDs
         representations: (N, 64)
-        metric: distance metric for comparison
+        metric: primary distance metric for re-identification comparison
         max_users: subsample if too many users (memory)
         seed: random seed for subsampling
 
     Returns:
-        Dict with NN distance statistics and the full distance array.
+        Dict with NN distance statistics for both metric and euclidean.
     """
     user_to_indices = defaultdict(list)
     for i, uid in enumerate(user_ids):
@@ -260,34 +263,47 @@ def compute_nn_distances(
         n_users = max_users
         print(f"    Subsampled to {n_users:,} users for NN distance computation")
 
-    print(f"    Computing pairwise {metric} distances for {n_users:,} user profiles...")
-    start = time.time()
-    dists = pairwise_distances(profiles, metric=metric)
+    def _compute_for_metric(m: str) -> dict:
+        start = time.time()
+        dists = pairwise_distances(profiles, metric=m)
+        np.fill_diagonal(dists, np.inf)
+        nn_dists = dists.min(axis=1)
+        elapsed = time.time() - start
+        print(f"    {m}: mean={nn_dists.mean():.4f}, "
+              f"median={np.median(nn_dists):.4f}, "
+              f"min={nn_dists.min():.4f}, max={nn_dists.max():.4f} ({elapsed:.1f}s)")
+        return {
+            "nn_distances": nn_dists,
+            "mean": float(nn_dists.mean()),
+            "median": float(np.median(nn_dists)),
+            "std": float(nn_dists.std()),
+            "min": float(nn_dists.min()),
+            "max": float(nn_dists.max()),
+            "p05": float(np.percentile(nn_dists, 5)),
+            "p25": float(np.percentile(nn_dists, 25)),
+            "p75": float(np.percentile(nn_dists, 75)),
+            "p95": float(np.percentile(nn_dists, 95)),
+        }
 
-    # Set diagonal to infinity so a user isn't its own nearest neighbor
-    np.fill_diagonal(dists, np.inf)
+    print(f"    Computing pairwise distances for {n_users:,} user profiles...")
 
-    nn_dists = dists.min(axis=1)  # nearest-neighbor distance per user
-    elapsed = time.time() - start
+    # Primary metric (for re-identification comparison)
+    primary = _compute_for_metric(metric)
 
-    print(f"    Done in {elapsed:.1f}s")
-    print(f"    NN distances: mean={nn_dists.mean():.4f}, "
-          f"median={np.median(nn_dists):.4f}, "
-          f"min={nn_dists.min():.4f}, max={nn_dists.max():.4f}")
+    # Euclidean (for certified radius comparison — radii are L2)
+    if metric != "euclidean":
+        euclidean = _compute_for_metric("euclidean")
+    else:
+        euclidean = primary
 
     return {
-        "nn_distances": nn_dists,
-        "mean": float(nn_dists.mean()),
-        "median": float(np.median(nn_dists)),
-        "std": float(nn_dists.std()),
-        "min": float(nn_dists.min()),
-        "max": float(nn_dists.max()),
-        "p05": float(np.percentile(nn_dists, 5)),
-        "p25": float(np.percentile(nn_dists, 25)),
-        "p75": float(np.percentile(nn_dists, 75)),
-        "p95": float(np.percentile(nn_dists, 95)),
+        # Primary metric results (top-level for backward compatibility)
+        **primary,
         "n_users": n_users,
         "metric": metric,
+        # Euclidean results (for certified radius comparison)
+        "euclidean": {k: v for k, v in euclidean.items() if k != "nn_distances"},
+        "euclidean_nn_distances": euclidean["nn_distances"],
     }
 
 

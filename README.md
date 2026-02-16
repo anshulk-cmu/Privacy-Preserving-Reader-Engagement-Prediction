@@ -75,7 +75,8 @@ The LSTM surpasses the MLP baseline across ranking metrics (AUC, F1, recall) by 
 │   ├── 01_eda_analysis.md           # EDA results and dataset documentation
 │   ├── 02_data_pipeline.md          # Preprocessing pipeline documentation
 │   ├── 03_mlp_baseline_analysis.md  # MLP model + re-identification analysis
-│   └── 04_lstm_analysis.md          # LSTM model + MLP comparison + privacy amplification
+│   ├── 04_lstm_analysis.md          # LSTM model + MLP comparison + privacy amplification
+│   └── 05_randomized_smoothing.md   # Randomized smoothing: math, results, tradeoff analysis
 ├── data/
 │   ├── ebnerd_50k/                  # Custom 50K-user dataset
 │   │   ├── train/
@@ -108,7 +109,7 @@ The LSTM surpasses the MLP baseline across ranking metrics (AUC, F1, recall) by 
 │       ├── lstm_model.py            # BiLSTM + Attention model (~1M params)
 │       ├── train.py                 # Training infrastructure, losses, plotting
 │       ├── attack.py                # Nearest-neighbor re-identification attack
-│       └── smoothing.py             # Randomized smoothing module (Phase 4)
+│       └── smoothing.py             # Randomized smoothing: analytical + MC + re-id (Phase 4)
 ├── outputs/
 │   ├── figures/                     # EDA plots (Phase 1)
 │   └── models/
@@ -117,12 +118,25 @@ The LSTM surpasses the MLP baseline across ranking metrics (AUC, F1, recall) by 
 │       │   ├── training_curves.png, evaluation_plots.png
 │       │   ├── reidentification_*.png
 │       │   └── reidentification_results.json
-│       └── lstm/                    # LSTM outputs (Phase 3B)
-│           ├── checkpoint.pt, metrics.json, representations.npz
-│           ├── training_curves.png, evaluation_plots.png
-│           ├── reidentification_*.png
-│           ├── lstm_vs_mlp_comparison.png
-│           └── reidentification_results.json
+│       ├── lstm/                    # LSTM outputs (Phase 3B)
+│       │   ├── checkpoint.pt, metrics.json, representations.npz
+│       │   ├── training_curves.png, evaluation_plots.png
+│       │   ├── reidentification_*.png
+│       │   ├── lstm_vs_mlp_comparison.png
+│       │   └── reidentification_results.json
+│       └── smoothing/               # Randomized smoothing outputs (Phase 4)
+│           ├── smoothing_results.json
+│           ├── comparison/          # Cross-model comparison plots
+│           │   ├── privacy_utility_tradeoff.png  (main deliverable)
+│           │   ├── reid_decay.png, auc_degradation.png
+│           │   ├── certification_coverage.png
+│           │   └── smoothing_summary.png
+│           ├── mlp/                 # MLP-specific plots
+│           │   ├── certified_radii.png
+│           │   └── recommended_sigma_detail.png
+│           └── lstm/                # LSTM-specific plots
+│               ├── certified_radii.png
+│               └── recommended_sigma_detail.png
 └── ebnerd-benchmark/                # Cloned EB-NeRD benchmark repo (reference)
 ```
 
@@ -158,13 +172,16 @@ The LSTM surpasses the MLP baseline across ranking metrics (AUC, F1, recall) by 
 - A +0.52% AUC gain amplified re-identification risk by 9.1x, demonstrating non-linear privacy scaling
 - Documentation: [docs/04_lstm_analysis.md](docs/04_lstm_analysis.md)
 
-### Phase 4: Randomized Smoothing for Privacy (Planned)
-- Add calibrated Gaussian noise to 64-dim learned representations
-- Analytical smoothed prediction (exact for linear classification head)
-- Certify a radius R within which the prediction is stable (Cohen et al., ICML 2019)
-- Sweep noise levels to map the privacy-utility tradeoff curve
-- Compare MLP vs LSTM: how much noise does each model need for privacy?
-- Quantify the cost: AUC degradation at each noise level vs re-identification reduction
+### Phase 4: Randomized Smoothing for Privacy (Code Complete — Awaiting Execution)
+- Add calibrated Gaussian noise ε ~ N(0, σ²I₆₄) to 64-dim learned representations
+- Analytical smoothed prediction: P = Φ(logit / (σ·‖w‖)) — exact for linear classification head
+- Certified radius R = σ · Φ⁻¹(p_A) guarantees prediction stability (Cohen et al., ICML 2019)
+- Monte Carlo verification with Clopper-Pearson confidence bounds (α = 0.001)
+- Sweep 11 noise levels (σ = 0 to 3.0) mapping the full privacy-utility tradeoff
+- Dual-metric NN distances (cosine for re-id, euclidean for L2 certification comparison)
+- Compare MLP vs LSTM: quantify how much more noise the LSTM needs for equivalent privacy
+- 7 visualization plots including privacy-utility Pareto frontier (main deliverable)
+- Documentation: [docs/05_randomized_smoothing.md](docs/05_randomized_smoothing.md)
 
 ## Setup
 
