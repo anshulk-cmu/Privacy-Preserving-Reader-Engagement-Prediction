@@ -5,7 +5,7 @@
 data/
 
 # Large model artifacts (exceeds GitHub 100 MB limit)
-outputs/models/mlp_baseline/representations.npz
+outputs/models/*/representations.npz
 
 # Python bytecode
 __pycache__/
