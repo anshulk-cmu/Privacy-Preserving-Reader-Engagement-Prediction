@@ -467,7 +467,7 @@ def plot_representation_analysis(
     ax = axes[2]
     mean_pos = representations[labels == 1].mean(axis=0)
     mean_neg = representations[labels == 0].mean(axis=0)
-    x = np.arange(64)
+    x = np.arange(representations.shape[1])
     width = 0.35
     ax.bar(x - width/2, mean_pos, width, alpha=0.7, label="Engaged", color="red")
     ax.bar(x + width/2, mean_neg, width, alpha=0.7, label="Not Engaged", color="blue")
@@ -499,6 +499,8 @@ def fit(
     patience: int = 8,
     max_grad_norm: float = 1.0,
     device: Optional[torch.device] = None,
+    pct_start: float = 0.1,
+    skip_train_eval: bool = False,
 ) -> dict:
     """
     Full training loop with early stopping, OneCycleLR scheduling, and checkpointing.
@@ -515,6 +517,8 @@ def fit(
         patience: Early stopping patience (epochs without val AUC improvement)
         max_grad_norm: Gradient clipping max norm
         device: Compute device (auto-detected if None)
+        pct_start: Fraction of training for LR warmup (OneCycleLR). Default 0.1.
+        skip_train_eval: If True, skip full train-set evaluation each epoch (saves ~33% time).
 
     Returns:
         Dict with best metrics and training history
@@ -535,7 +539,7 @@ def fit(
         optimizer,
         max_lr=lr,
         total_steps=total_steps,
-        pct_start=0.1,
+        pct_start=pct_start,
         anneal_strategy="cos",
     )
 
@@ -553,6 +557,7 @@ def fit(
     print(f"  {len(train_loader.dataset):,} train / {len(val_loader.dataset):,} val samples")
     print(f"  Loss: {loss_name} | LR: {lr} | WD: {weight_decay}")
     print(f"  Batch size: {train_loader.batch_size} | Max epochs: {max_epochs} | Patience: {patience}")
+    print(f"  pct_start: {pct_start} | skip_train_eval: {skip_train_eval}")
     print(f"{'='*70}")
     print(f"\n  {'Epoch':>5s}  {'Train Loss':>10s}  {'Val Loss':>10s}  {'Val AUC':>8s}  "
           f"{'Val F1':>7s}  {'Val Acc':>7s}  {'Time':>6s}  {'Status'}")
@@ -567,13 +572,17 @@ def fit(
             scheduler=scheduler, max_grad_norm=max_grad_norm,
         )
 
-        # Evaluate on both sets (train eval for overfitting monitor)
+        # Evaluate validation set (always)
         val_metrics = evaluate(model, val_loader, eval_criterion, device)
-        train_metrics_full = evaluate(model, train_loader, eval_criterion, device)
 
-        # Store metrics (without raw arrays for JSON serialization)
-        train_record = {k: v for k, v in train_metrics_full.items() if not k.startswith("_")}
-        train_record["loss"] = train_loss  # use actual training loss, not eval loss
+        # Evaluate training set (optional -- expensive for large datasets)
+        if skip_train_eval:
+            train_record = {"loss": train_loss}
+        else:
+            train_metrics_full = evaluate(model, train_loader, eval_criterion, device)
+            train_record = {k: v for k, v in train_metrics_full.items() if not k.startswith("_")}
+            train_record["loss"] = train_loss
+
         val_record = {k: v for k, v in val_metrics.items() if not k.startswith("_")}
 
         history["train"].append(train_record)
@@ -638,6 +647,8 @@ def fit(
             "weight_decay": weight_decay,
             "max_epochs": max_epochs,
             "patience": patience,
+            "pct_start": pct_start,
+            "skip_train_eval": skip_train_eval,
         },
     }
     with open(output_dir / "metrics.json", "w") as f:

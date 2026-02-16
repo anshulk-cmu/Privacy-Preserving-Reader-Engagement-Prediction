@@ -1,4 +1,4 @@
-# Phase 2A: Data Preprocessing Pipeline
+# Phase 2: Data Preprocessing Pipeline
 
 **Privacy-Preserving Reader Engagement Prediction**
 **94-806 Privacy in the Digital Age | Carnegie Mellon University**
@@ -24,7 +24,7 @@
 
 ## 1. Overview
 
-Phase 2A transforms the raw `ebnerd_50k` parquet files into model-ready numpy arrays and PyTorch DataLoaders. This is the bridge between the raw dataset (Phase 1) and model training (Phases 2B/2C).
+Phase 2 transforms the raw `ebnerd_50k` parquet files into model-ready numpy arrays and PyTorch DataLoaders. This is the bridge between the raw dataset (Phase 1) and model training (Phases 3A/3B).
 
 **Scripts:**
 - `src/data/preprocessing.py` -- Loads raw parquets, creates labels, engineers features, normalizes, saves numpy arrays and fitted scalers
@@ -122,16 +122,18 @@ Based on the inspection, we selected three feature groups:
 - **History sequences**: Raw `(read_time, scroll_percentage)` pairs from the user's last 50 articles
 - Shape: `(N, 50, 2)` -- a 50-step time series of 2 behavioral features per user per impression
 
-### For MLP (aggregate model)
-- **21 handcrafted aggregate features** computed from the full history:
+### For MLP and LSTM (aggregate features)
+- **27 handcrafted aggregate features** computed from the full history:
   - Read time: mean, std, median, P10, P90 (5 features)
   - Scroll percentage: mean, std, median, P10, P90 (5 features)
   - Last-5 read times (5 features)
   - Last-5 scroll percentages (5 features)
   - History length (1 feature)
+  - Engagement rate, deep scroll rate, long read rate (3 features)
+  - RT momentum, SP momentum, RT-SP correlation (3 features)
 
 ### Shared by both models
-- **Article features**: category index, article type index, premium flag, sentiment score (4 features)
+- **Article features** (7 total): category index, article type index, premium flag, sentiment score, body_len_log, title_len_log, subtitle_len_log
 - **Context features**: device type, is_subscriber, is_sso_user (3 features)
 
 ---
@@ -212,7 +214,7 @@ Resulting distribution: mean = 0.625, range [0, 1].
 
 ### Aggregate features
 
-All 21 aggregate features are normalized via a single StandardScaler fitted on train. Resulting train distribution: mean = 0.000, std = 1.000 per feature.
+All 27 aggregate features are normalized via a single StandardScaler fitted on train. Resulting train distribution: mean = 0.000, std = 1.000 per feature.
 
 ### No data leakage
 
@@ -224,7 +226,7 @@ Validation data uses the **train-fitted** scalers:
 
 ## 8. Aggregate Feature Engineering
 
-21 features computed from each user's **full** history (not truncated to 50):
+27 features computed from each user's **full** history (not truncated to 50):
 
 | # | Feature | Description |
 |---|---------|-------------|
@@ -241,6 +243,14 @@ Validation data uses the **train-fitted** scalers:
 | 10-14 | `last5_rt_*` | Read times of last 5 articles (padded with 0 if history < 5) |
 | 15-19 | `last5_sp_*` | Scroll percentages of last 5 articles (padded with 0 if history < 5) |
 | 20 | `hist_len` | Number of articles in history |
+| 21 | `hist_engagement_rate` | P(RT > 30s AND SP > 50%) across full history |
+| 22 | `hist_deep_scroll_rate` | P(SP > 80%) across full history |
+| 23 | `hist_long_read_rate` | P(RT > 60s) across full history |
+| 24 | `rt_momentum` | mean(last-5 RT) / mean(all RT), clipped [0.1, 10] |
+| 25 | `sp_momentum` | mean(last-5 SP) / mean(all SP), clipped [0.1, 10] |
+| 26 | `rt_sp_correlation` | Pearson correlation between RT and SP sequences |
+
+Features 0-20 are the original MLP baseline features. Features 21-26 were added for the LSTM pipeline to capture joint engagement behavior, behavioral momentum, and reading consistency.
 
 After StandardScaler, all features have mean ~0 and std ~1 on train. Value ranges are reasonable:
 - Most features range [-5, +20] -- long tails from power users with extreme reading patterns
@@ -250,7 +260,7 @@ After StandardScaler, all features have mean ~0 and std ~1 on train. Value range
 
 ## 9. Article and Context Features
 
-### Article features (4 per sample)
+### Article features (7 per sample)
 
 Looked up from `articles.parquet` using the **first article in `article_ids_clicked`** (since `article_id` is 70% null, but `article_ids_clicked` is always populated for labelable rows):
 
@@ -260,6 +270,11 @@ Looked up from `articles.parquet` using the **first article in `article_ids_clic
 | `article_type_idx` | Int (for embedding) | [1, 15] | 16 possible types; not all appear |
 | `premium` | Float | {0, 1} | Binary flag |
 | `sentiment_score` | Float | [0.395, 0.998] | Sentiment from NLP model |
+| `body_len_log` | Float | log1p(char count) | Article body length (log-transformed) |
+| `title_len_log` | Float | log1p(char count) | Article title length (log-transformed) |
+| `subtitle_len_log` | Float | log1p(char count) | Article subtitle length (log-transformed) |
+
+The first 2 features are integer indices for embedding layers. The remaining 5 are continuous features passed directly (`article_cont_dim=5`). Content length features (5-7) were added for the LSTM pipeline to capture article length effects on engagement.
 
 Zero rows had all-zero article features (every impression had a valid clicked article in the lookup).
 
@@ -281,8 +296,8 @@ Zero rows had all-zero article features (every impression had a valid clicked ar
 |------|---------------|-------------|-------|-------------|
 | `history_seq.npy` | (546183, 50, 2) | (567980, 50, 2) | float32 | Normalized behavioral sequences |
 | `history_lengths.npy` | (546183,) | (567980,) | int32 | Actual sequence lengths |
-| `agg_features.npy` | (546183, 21) | (567980, 21) | float32 | StandardScaled aggregate features |
-| `article_features.npy` | (546183, 4) | (567980, 4) | float32 | Category/type idx + continuous |
+| `agg_features.npy` | (546183, 27) | (567980, 27) | float32 | StandardScaled aggregate features |
+| `article_features.npy` | (546183, 7) | (567980, 7) | float32 | Category/type idx + continuous |
 | `context_features.npy` | (546183, 3) | (567980, 3) | float32 | Device, subscriber, SSO |
 | `labels.npy` | (546183,) | (567980,) | float32 | Binary engagement label |
 | `user_ids.npy` | (546183,) | (567980,) | uint32 | For re-identification analysis |
@@ -292,7 +307,7 @@ Zero rows had all-zero article features (every impression had a valid clicked ar
 | File | Contents |
 |------|----------|
 | `rt_scaler.pkl` | Fitted StandardScaler for log1p(read_time) |
-| `agg_scaler.pkl` | Fitted StandardScaler for 21 aggregate features |
+| `agg_scaler.pkl` | Fitted StandardScaler for 27 aggregate features |
 | `metadata.json` | Feature dimensions, sample counts, positive rates |
 
 ### metadata.json contents
@@ -306,7 +321,9 @@ Zero rows had all-zero article features (every impression had a valid clicked ar
   "n_val": 567980,
   "train_pos_rate": 0.4015,
   "val_pos_rate": 0.4090,
-  "agg_feature_dim": 21,
+  "agg_feature_dim": 27,
+  "article_feature_dim": 7,
+  "article_cont_dim": 5,
   "context_feature_dim": 3,
   "history_feature_dim": 2
 }
@@ -320,10 +337,10 @@ Each batch is a dict with these keys:
 |-----|-------|-------|---------|
 | `history_seq` | (B, 50, 2) | float32 | LSTM |
 | `history_length` | (B,) | int64 | LSTM (masking) |
-| `agg_features` | (B, 21) | float32 | MLP |
+| `agg_features` | (B, 27) | float32 | Both |
 | `article_cat` | (B,) | int64 | Both (embedding) |
 | `article_type` | (B,) | int64 | Both (embedding) |
-| `article_cont` | (B, 2) | float32 | Both (premium, sentiment) |
+| `article_cont` | (B, 5) | float32 | Both (premium, sentiment, content lengths) |
 | `context` | (B, 3) | float32 | Both |
 | `label` | (B,) | float32 | Both (target) |
 | `user_id` | (B,) | int64 | Privacy experiments |

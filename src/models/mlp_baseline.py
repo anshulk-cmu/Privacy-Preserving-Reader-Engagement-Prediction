@@ -6,16 +6,18 @@ engagement prediction. Produces a 64-dim user representation for
 privacy experiments.
 
 Fixes over v2:
-  - Width reduced 512->256 (58-dim input doesn't need 512-wide layers;
-    over-parameterization caused overfitting gap and wasted capacity)
-  - SiLU activation replaces GELU (smoother gradient flow, no dead zone
-    at -0.17 that caused 6/64 dead dimensions in v2)
-  - Representation layer uses LayerNorm only (no activation), preventing
-    dead dimensions by allowing full real-valued range
-  - ~230K params (vs 552K in v2, 120K in v1) — sweet spot
+  - Width reduced 512->256 (over-parameterization caused overfitting)
+  - SiLU activation replaces GELU (smoother gradient flow)
+  - Representation layer uses LayerNorm only (no activation)
+  - ~207K params (vs 552K in v2, 120K in v1)
 
-Architecture:
-    Input (58) -> Linear(256) -> LN -> SiLU -> Drop(0.2)
+NOTE: The existing MLP checkpoint was trained with agg_dim=21 and
+article_cont_dim=2 on the original preprocessing pipeline. The current
+pipeline produces agg_dim=27 and article_cont_dim=5 (for LSTM). To
+retrain the MLP on current data, pass the updated dimensions explicitly.
+
+Architecture (with default dims):
+    Input (67) -> Linear(256) -> LN -> SiLU -> Drop(0.2)
               -> [ResBlock: Linear(256) -> LN -> SiLU -> Drop(0.2)] + residual
               -> Linear(256) -> LN -> SiLU -> Drop(0.2)
               -> Linear(128) -> LN -> SiLU -> Drop(0.2)
@@ -49,11 +51,11 @@ class MLPEngagementModel(nn.Module):
     Deep MLP for engagement prediction (v3).
 
     Consumes:
-        - agg_features (B, 21): StandardScaled aggregate history features
+        - agg_features (B, agg_dim): StandardScaled aggregate history features
         - article_cat (B,): category index -> embedding
         - article_type (B,): article type index -> embedding
-        - article_cont (B, 2): [premium, sentiment_score]
-        - context (B, 3): [device_type, is_subscriber, is_sso_user]
+        - article_cont (B, article_cont_dim): continuous article features
+        - context (B, context_dim): [device_type, is_subscriber, is_sso_user]
 
     Produces:
         - logits (B,): raw logits for loss function
@@ -61,14 +63,15 @@ class MLPEngagementModel(nn.Module):
     """
 
     def __init__(self, n_categories: int = 32, n_article_types: int = 16,
-                 agg_dim: int = 21, cat_emb_dim: int = 16, type_emb_dim: int = 16):
+                 agg_dim: int = 27, article_cont_dim: int = 5,
+                 context_dim: int = 3,
+                 cat_emb_dim: int = 16, type_emb_dim: int = 16):
         super().__init__()
 
         self.cat_embedding = nn.Embedding(n_categories, cat_emb_dim)
         self.type_embedding = nn.Embedding(n_article_types, type_emb_dim)
 
-        # Total input: agg(21) + cat_emb(16) + type_emb(16) + article_cont(2) + context(3) = 58
-        input_dim = agg_dim + cat_emb_dim + type_emb_dim + 2 + 3
+        input_dim = agg_dim + cat_emb_dim + type_emb_dim + article_cont_dim + context_dim
 
         # Layer 1: input -> 256
         self.layer1 = nn.Sequential(
@@ -124,16 +127,16 @@ class MLPEngagementModel(nn.Module):
 
     def _build_input(self, batch: dict) -> torch.Tensor:
         """Concatenate all input features into a single vector."""
-        cat_emb = self.cat_embedding(batch["article_cat"])    # (B, 16)
-        type_emb = self.type_embedding(batch["article_type"]) # (B, 16)
+        cat_emb = self.cat_embedding(batch["article_cat"])
+        type_emb = self.type_embedding(batch["article_type"])
 
         x = torch.cat([
-            batch["agg_features"],   # (B, 21)
-            cat_emb,                 # (B, 16)
-            type_emb,                # (B, 16)
-            batch["article_cont"],   # (B, 2)
-            batch["context"],        # (B, 3)
-        ], dim=-1)  # (B, 58)
+            batch["agg_features"],
+            cat_emb,
+            type_emb,
+            batch["article_cont"],
+            batch["context"],
+        ], dim=-1)
 
         return x
 
@@ -159,7 +162,7 @@ class MLPEngagementModel(nn.Module):
 
 
 if __name__ == "__main__":
-    model = MLPEngagementModel()
+    model = MLPEngagementModel(agg_dim=27, article_cont_dim=5)
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Total parameters:     {total_params:,}")
@@ -167,10 +170,10 @@ if __name__ == "__main__":
 
     B = 4
     batch = {
-        "agg_features": torch.randn(B, 21),
+        "agg_features": torch.randn(B, 27),
         "article_cat": torch.randint(0, 32, (B,)),
         "article_type": torch.randint(0, 16, (B,)),
-        "article_cont": torch.randn(B, 2),
+        "article_cont": torch.randn(B, 5),
         "context": torch.randn(B, 3),
     }
 

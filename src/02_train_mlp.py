@@ -1,16 +1,12 @@
 """
-02_train_mlp.py — Train the Deep MLP engagement predictor (v2)
+02_train_mlp.py — Train the Deep MLP engagement predictor (v3)
 ===============================================================
-Loads preprocessed data, trains MLPEngagementModel with Focal Loss,
+Loads preprocessed data, trains MLPEngagementModel with LabelSmoothingBCE,
 saves checkpoint + metrics + representations + comprehensive plots.
 
-Changes from v1:
-  - Deeper model (7 layers, 552K params vs 120K)
-  - Focal Loss (handles class imbalance, focuses on hard examples)
-  - 50 max epochs with patience 8 (was 30/5)
-  - Full train-set evaluation each epoch (overfitting monitoring)
-  - Comprehensive plots: training curves, ROC, PR, confusion matrix,
-    t-SNE of representations
+Architecture: 6-layer MLP with residual connections, ~207K params.
+Loss: LabelSmoothingBCE with pos_weight for class balance.
+50 max epochs, patience 8, full train-set evaluation each epoch.
 
 Usage:
     source .venv/bin/activate
@@ -44,7 +40,7 @@ def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     print("=" * 70)
-    print("  Phase 2B: Deep MLP Training (v2 — Label Smoothing BCE)")
+    print("  Phase 3A: Deep MLP Training (v3 — Label Smoothing BCE)")
     print("=" * 70)
 
     # ---- Load data ----
@@ -62,9 +58,10 @@ def main():
         n_categories=metadata["n_categories"],
         n_article_types=metadata["n_article_types"],
         agg_dim=metadata["agg_feature_dim"],
+        article_cont_dim=metadata.get("article_cont_dim", 5),
     )
     total_params = sum(p.numel() for p in model.parameters())
-    print(f"\n  Model: MLPEngagementModel v2 ({total_params:,} parameters)")
+    print(f"\n  Model: MLPEngagementModel v3 ({total_params:,} parameters)")
     print(f"  Device: {get_device()}")
 
     # ---- Label Smoothing BCE with pos_weight for class balance ----
