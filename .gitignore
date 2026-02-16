@@ -1,0 +1,23 @@
+# Virtual environment
+.venv/
+
+# Data (too large for GitHub; see README for reproduction instructions)
+data/
+
+# Large model artifacts (exceeds GitHub 100 MB limit)
+outputs/models/mlp_baseline/representations.npz
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS metadata
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.idea/
+.vscode/
