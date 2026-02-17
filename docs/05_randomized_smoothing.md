@@ -3,6 +3,10 @@
 **Privacy-Preserving Reader Engagement Prediction**
 **94-806 Privacy in the Digital Age | Carnegie Mellon University**
 
+> **Note**: This document references MLP and LSTM results from a prior execution environment.
+> Both models have been retrained on the current device: MLP (AUC 0.6951, 69x lift) and LSTM (AUC 0.6975, 2,958x lift).
+> All comparison numbers will be updated when this phase is re-executed on the current device.
+
 ---
 
 ## Table of Contents

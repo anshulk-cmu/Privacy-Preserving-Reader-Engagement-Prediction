@@ -5,38 +5,38 @@
       "n_probes": 280423,
       "metric": "euclidean",
       "top_k_accuracy": {
-        "1": 0.09665398344643628,
-        "5": 0.1469422978856941,
-        "10": 0.17218273822047406,
-        "20": 0.20045074762055895
+        "1": 0.09843700409738146,
+        "5": 0.1519383217496425,
+        "10": 0.17859448048127294,
+        "20": 0.20804284955228353
       },
-      "mrr": 0.12311052430792058,
-      "mean_rank": 3652.0581550015513,
-      "median_rank": 1290.0,
-      "per_user_accuracy_mean": 0.11087143905955729,
-      "per_user_accuracy_std": 0.19260889724660282,
+      "mrr": 0.1264458231746182,
+      "mean_rank": 3794.6717209358717,
+      "median_rank": 1233.0,
+      "per_user_accuracy_mean": 0.10684168104431005,
+      "per_user_accuracy_std": 0.1909299923498003,
       "per_user_accuracy_median": 0.0,
-      "users_with_100pct_reid": 225,
-      "users_with_0pct_reid": 17838
+      "users_with_100pct_reid": 223,
+      "users_with_0pct_reid": 18218
     },
     "cosine": {
       "n_gallery_users": 28361,
       "n_probes": 280423,
       "metric": "cosine",
       "top_k_accuracy": {
-        "1": 0.10059089304372323,
-        "5": 0.15297247372719072,
-        "10": 0.1785766502747635,
-        "20": 0.20733677337450923
+        "1": 0.10428531183248164,
+        "5": 0.16029712256127351,
+        "10": 0.18774494246192358,
+        "20": 0.2181525766431427
       },
-      "mrr": 0.1279868229050952,
-      "mean_rank": 3632.0944073774263,
-      "median_rank": 1216.0,
-      "per_user_accuracy_mean": 0.1125136526867749,
-      "per_user_accuracy_std": 0.19248587357621252,
+      "mrr": 0.13344630957024486,
+      "mean_rank": 3741.043166929959,
+      "median_rank": 1126.0,
+      "per_user_accuracy_mean": 0.10894908523289001,
+      "per_user_accuracy_std": 0.1904143230743535,
       "per_user_accuracy_median": 0.0,
-      "users_with_100pct_reid": 231,
-      "users_with_0pct_reid": 17440
+      "users_with_100pct_reid": 220,
+      "users_with_0pct_reid": 17738
     }
   },
   "mlp": {
@@ -45,38 +45,38 @@
       "n_probes": 280423,
       "metric": "euclidean",
       "top_k_accuracy": {
-        "1": 0.009261009261009262,
-        "5": 0.015804695049978067,
-        "10": 0.02028364292515236,
-        "20": 0.026706083309856896
+        "1": 0.0017616244031338371,
+        "5": 0.004963929492231379,
+        "10": 0.008077083548781661,
+        "20": 0.01282348452159773
       },
-      "mrr": 0.014155179077294255,
-      "mean_rank": 3890.580779750591,
-      "median_rank": 2242.0,
-      "per_user_accuracy_mean": 0.016544383221075078,
-      "per_user_accuracy_std": 0.08179940120619837,
+      "mrr": 0.0048572622340477805,
+      "mean_rank": 4633.166124034048,
+      "median_rank": 3096.0,
+      "per_user_accuracy_mean": 0.0026543700208567747,
+      "per_user_accuracy_std": 0.029082239899175057,
       "per_user_accuracy_median": 0.0,
-      "users_with_100pct_reid": 37,
-      "users_with_0pct_reid": 26679
+      "users_with_100pct_reid": 2,
+      "users_with_0pct_reid": 28003
     },
     "cosine": {
       "n_gallery_users": 28361,
       "n_probes": 280423,
       "metric": "cosine",
       "top_k_accuracy": {
-        "1": 0.011054728035860112,
-        "5": 0.019367170310566537,
-        "10": 0.024452345207062187,
-        "20": 0.0317698619585412
+        "1": 0.002417776002681663,
+        "5": 0.006115760832741964,
+        "10": 0.009499934028235915,
+        "20": 0.014556580594316443
       },
-      "mrr": 0.016772686042921165,
-      "mean_rank": 3892.6972466595107,
-      "median_rank": 2266.0,
-      "per_user_accuracy_mean": 0.01757702253398544,
-      "per_user_accuracy_std": 0.08163027590763747,
+      "mrr": 0.005778336161530963,
+      "mean_rank": 4723.228123228123,
+      "median_rank": 3121.0,
+      "per_user_accuracy_mean": 0.003125064817289438,
+      "per_user_accuracy_std": 0.029950437531869302,
       "per_user_accuracy_median": 0.0,
-      "users_with_100pct_reid": 34,
-      "users_with_0pct_reid": 26350
+      "users_with_100pct_reid": 2,
+      "users_with_0pct_reid": 27868
     }
   },
   "baseline": {

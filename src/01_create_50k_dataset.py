@@ -15,7 +15,7 @@ The temporal split methodology is preserved exactly as in the original EB-NeRD p
   - History windows: 21 days prior to each behavior window
 
 Usage:
-    source .venv/bin/activate
+    conda activate privacy
     python src/01_create_50k_dataset.py
 
 Requires:
@@ -24,10 +24,17 @@ Requires:
 """
 
 import sys
+import os
 from pathlib import Path
 import polars as pl
 import numpy as np
 import shutil
+
+# Windows UTF-8 console support
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BENCHMARK_SRC = PROJECT_ROOT / "ebnerd-benchmark" / "src"
@@ -106,7 +113,7 @@ def main():
     (OUTPUT_DIR / "train").mkdir(exist_ok=True)
     (OUTPUT_DIR / "validation").mkdir(exist_ok=True)
 
-    target_series = pl.Series(DEFAULT_USER_COL, sorted(target_users))
+    target_list = sorted(target_users)
 
     for split in ["train", "validation"]:
         print(f"\n  --- {split} split ---")
@@ -117,7 +124,7 @@ def main():
         df_beh = pl.read_parquet(beh_path)
         print(f"{len(df_beh):,} rows")
 
-        df_beh_filtered = df_beh.filter(pl.col(DEFAULT_USER_COL).is_in(target_series))
+        df_beh_filtered = df_beh.filter(pl.col(DEFAULT_USER_COL).is_in(target_list))
         print(f"  Filtered behaviors: {len(df_beh_filtered):,} rows ({len(df_beh_filtered)/len(df_beh)*100:.1f}%)")
 
         out_beh = OUTPUT_DIR / split / "behaviors.parquet"
@@ -130,7 +137,7 @@ def main():
         df_hist = pl.read_parquet(hist_path)
         print(f"{len(df_hist):,} rows")
 
-        df_hist_filtered = df_hist.filter(pl.col(DEFAULT_USER_COL).is_in(target_series))
+        df_hist_filtered = df_hist.filter(pl.col(DEFAULT_USER_COL).is_in(target_list))
         print(f"  Filtered history: {len(df_hist_filtered):,} rows ({len(df_hist_filtered)/len(df_hist)*100:.1f}%)")
 
         out_hist = OUTPUT_DIR / split / "history.parquet"

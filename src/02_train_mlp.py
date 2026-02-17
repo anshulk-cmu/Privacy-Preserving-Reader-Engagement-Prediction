@@ -4,18 +4,28 @@
 Loads preprocessed data, trains MLPEngagementModel with LabelSmoothingBCE,
 saves checkpoint + metrics + representations + comprehensive plots.
 
-Architecture: 6-layer MLP with residual connections, ~207K params.
+Architecture: 6-layer MLP with residual connections, ~210K params.
+Features: 27 aggregate + 7 article (2 embedding + 5 continuous) + 3 context = 67 input dims.
 Loss: LabelSmoothingBCE with pos_weight for class balance.
 50 max epochs, patience 8, full train-set evaluation each epoch.
 
 Usage:
-    source .venv/bin/activate
+    conda activate privacy
     python src/02_train_mlp.py
 """
 
+import os
 import sys
 import time
 from pathlib import Path
+
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
+import matplotlib
+matplotlib.use("Agg")
 
 import numpy as np
 import torch
@@ -34,20 +44,35 @@ from models.train import (
 )
 
 
+def print_system_info():
+    """Print system and hardware information."""
+    print("\n  System Information:")
+    print(f"    Python:  {sys.version.split()[0]}")
+    print(f"    PyTorch: {torch.__version__}")
+    print(f"    NumPy:   {np.__version__}")
+    print(f"    CUDA:    {torch.version.cuda if torch.cuda.is_available() else 'N/A'}")
+    if torch.cuda.is_available():
+        props = torch.cuda.get_device_properties(0)
+        print(f"    GPU:     {torch.cuda.get_device_name(0)} ({props.total_memory / 1024**3:.1f} GB)")
+    print(f"    CPU:     {os.cpu_count()} cores")
+
+
 def main():
+    overall_start = time.time()
     PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
     OUTPUT_DIR = PROJECT_ROOT / "outputs" / "models" / "mlp_baseline"
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     print("=" * 70)
-    print("  Phase 3A: Deep MLP Training (v3 — Label Smoothing BCE)")
+    print("  Phase 3A: Deep MLP Training (v3 — 27 features, Label Smoothing BCE)")
     print("=" * 70)
+    print_system_info()
 
     # ---- Load data ----
     print("\nLoading data...")
     metadata = load_metadata(PROCESSED_DIR)
     train_loader, val_loader, _ = get_dataloaders(
-        PROCESSED_DIR, batch_size=512, pin_memory=False,
+        PROCESSED_DIR, batch_size=512, pin_memory=torch.cuda.is_available(),
     )
     print(f"  Train: {len(train_loader.dataset):,} samples, {len(train_loader):,} batches")
     print(f"  Val:   {len(val_loader.dataset):,} samples, {len(val_loader):,} batches")
@@ -124,14 +149,16 @@ def main():
     print(f"\n  Generating representation analysis plots...")
     plot_representation_analysis(
         val_user_ids, val_reprs, val_labels, OUTPUT_DIR,
-        model_name="MLPEngagementModel v2",
+        model_name="MLPEngagementModel v3 (27 features)",
     )
 
     # ---- Final summary ----
+    overall_time = time.time() - overall_start
     print(f"\n{'='*70}")
     print(f"  TRAINING COMPLETE")
     print(f"{'='*70}")
-    print(f"  Total time:       {train_time:.1f}s ({train_time/60:.1f} min)")
+    print(f"  Training time:    {train_time:.1f}s ({train_time/60:.1f} min)")
+    print(f"  Overall time:     {overall_time:.1f}s ({overall_time/60:.1f} min)")
     print(f"  Best epoch:       {results['best_epoch']}")
     print(f"  Best val AUC:     {results['best_val_auc']:.4f}")
     print(f"  Val F1:           {results['final_val_metrics']['f1']:.4f}")

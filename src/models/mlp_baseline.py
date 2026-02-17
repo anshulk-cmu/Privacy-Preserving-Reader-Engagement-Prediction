@@ -9,14 +9,15 @@ Fixes over v2:
   - Width reduced 512->256 (over-parameterization caused overfitting)
   - SiLU activation replaces GELU (smoother gradient flow)
   - Representation layer uses LayerNorm only (no activation)
-  - ~207K params (vs 552K in v2, 120K in v1)
+  - ~210K params (vs 552K in v2, 120K in v1)
 
-NOTE: The existing MLP checkpoint was trained with agg_dim=21 and
-article_cont_dim=2 on the original preprocessing pipeline. The current
-pipeline produces agg_dim=27 and article_cont_dim=5 (for LSTM). To
-retrain the MLP on current data, pass the updated dimensions explicitly.
+Input features (67 dims after embeddings):
+  - 27 aggregate history features (StandardScaled)
+  - 16-dim category embedding + 16-dim article type embedding
+  - 5 continuous article features (premium, sentiment, body/title/subtitle len)
+  - 3 context features (device_type, is_subscriber, is_sso_user)
 
-Architecture (with default dims):
+Architecture:
     Input (67) -> Linear(256) -> LN -> SiLU -> Drop(0.2)
               -> [ResBlock: Linear(256) -> LN -> SiLU -> Drop(0.2)] + residual
               -> Linear(256) -> LN -> SiLU -> Drop(0.2)

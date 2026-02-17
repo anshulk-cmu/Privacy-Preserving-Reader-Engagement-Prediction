@@ -13,21 +13,33 @@ Analyzes the ebnerd_50k dataset to understand:
   6. Privacy-relevant: uniqueness of behavioral sequences
 
 Usage:
-    source .venv/bin/activate
+    conda activate privacy
     python src/00_eda.py
 
 Requires ebnerd_50k dataset at data/ebnerd_50k/
 """
 
 import sys
+import os
 from pathlib import Path
 import polars as pl
 import numpy as np
+import matplotlib
+matplotlib.use("Agg")  # Non-interactive backend (no GUI needed)
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
+import time
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
+
+# ---------------------------------------------------------------------------
+# Windows UTF-8 console support
+# ---------------------------------------------------------------------------
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
 # ---------------------------------------------------------------------------
 # Add the benchmark repo's src to path so we can import ebrec utilities
@@ -62,6 +74,10 @@ FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 ENGAGEMENT_SCROLL_THRESHOLD = 50  # percent
 ENGAGEMENT_READ_TIME_THRESHOLD = 30  # seconds
 
+# Hardware-aware settings (24 cores, 64GB RAM)
+N_PAIRWISE_SAMPLE = 2000  # Larger sample for pairwise distances (was 1000)
+PLOT_DPI = 150
+
 
 def section(title: str):
     """Print a visible section header."""
@@ -89,6 +105,22 @@ def load_and_inspect_parquet(name: str, path: Path) -> pl.DataFrame:
 
 
 def main():
+    t_start = time.time()
+
+    section("0. SYSTEM INFO")
+    print(f"  Python:    {sys.version.split()[0]}")
+    print(f"  Polars:    {pl.__version__}")
+    print(f"  NumPy:     {np.__version__}")
+    print(f"  Platform:  {sys.platform}")
+    print(f"  CPU cores: {os.cpu_count()}")
+    try:
+        import torch
+        print(f"  PyTorch:   {torch.__version__}")
+        print(f"  CUDA:      {torch.cuda.is_available()} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A'})")
+    except ImportError:
+        print(f"  PyTorch:   not installed")
+    print(f"  Data dir:  {DATA_DIR}")
+
     section("1. LOADING DATA")
 
     # Behaviors
@@ -189,7 +221,7 @@ def main():
             axes[1, idx].legend()
 
     plt.tight_layout()
-    plt.savefig(FIGURES_DIR / "01_engagement_distributions.png", dpi=150)
+    plt.savefig(FIGURES_DIR / "01_engagement_distributions.png", dpi=PLOT_DPI)
     print(f"\n  Saved: {FIGURES_DIR / '01_engagement_distributions.png'}")
     plt.close()
 
@@ -325,7 +357,7 @@ def main():
         axes[2].set_xlabel("Percentage")
 
     plt.tight_layout()
-    plt.savefig(FIGURES_DIR / "02_history_distributions.png", dpi=150)
+    plt.savefig(FIGURES_DIR / "02_history_distributions.png", dpi=PLOT_DPI)
     print(f"\n  Saved: {FIGURES_DIR / '02_history_distributions.png'}")
     plt.close()
 
@@ -370,15 +402,18 @@ def main():
         print(f"    Uniqueness ratio: {100*n_unique/n_users:.1f}%")
         print(f"    --> {'HIGH' if n_unique/n_users > 0.8 else 'MODERATE'} re-identification risk")
 
-        # Pairwise distance analysis on a sample
-        sample_size = min(1000, n_users)
+        # Pairwise distance analysis on a sample (larger for better statistics)
+        sample_size = min(N_PAIRWISE_SAMPLE, n_users)
         features = df_stats.sample(n=sample_size, seed=42).to_numpy()
         from sklearn.preprocessing import StandardScaler
         features_scaled = StandardScaler().fit_transform(features)
 
         from scipy.spatial.distance import pdist
+        t0 = time.time()
         distances = pdist(features_scaled, metric="euclidean")
+        dt = time.time() - t0
         print(f"\n  Pairwise L2 distances (sample of {sample_size} users, standardized):")
+        print(f"    Computed {len(distances):,} pairwise distances in {dt:.2f}s")
         print(f"    Mean:   {np.mean(distances):.3f}")
         print(f"    Median: {np.median(distances):.3f}")
         print(f"    Min:    {np.min(distances):.4f}")
@@ -386,13 +421,36 @@ def main():
         print(f"    P95:    {np.percentile(distances, 95):.3f}")
         print(f"    --> Nearest-neighbor distances indicate how easy re-identification would be")
 
-        fig, ax = plt.subplots(1, 1, figsize=(10, 5))
-        ax.hist(distances, bins=100, color="#E91E63", alpha=0.7, edgecolor="white")
-        ax.set_title("Pairwise L2 Distances Between User Behavioral Fingerprints", fontsize=12, fontweight="bold")
-        ax.set_xlabel("Euclidean Distance (standardized feature space)")
-        ax.set_ylabel("Count")
+        # Nearest-neighbor analysis (1-NN distance per user)
+        from scipy.spatial.distance import squareform
+        dist_matrix = squareform(distances)
+        np.fill_diagonal(dist_matrix, np.inf)
+        nn_distances = dist_matrix.min(axis=1)
+        print(f"\n  Nearest-neighbor distances (per user):")
+        print(f"    Mean 1-NN dist:   {np.mean(nn_distances):.4f}")
+        print(f"    Median 1-NN dist: {np.median(nn_distances):.4f}")
+        print(f"    Min 1-NN dist:    {np.min(nn_distances):.4f}")
+        print(f"    Max 1-NN dist:    {np.max(nn_distances):.4f}")
+        print(f"    Users with 1-NN < 0.1: {np.sum(nn_distances < 0.1)}")
+        print(f"    Users with 1-NN < 0.5: {np.sum(nn_distances < 0.5)}")
+        print(f"    --> Even small distances enable re-identification via nearest-neighbor matching")
+
+        fig, axes = plt.subplots(1, 2, figsize=(16, 5))
+        axes[0].hist(distances, bins=100, color="#E91E63", alpha=0.7, edgecolor="white")
+        axes[0].set_title("Pairwise L2 Distances Between User Behavioral Fingerprints", fontsize=11, fontweight="bold")
+        axes[0].set_xlabel("Euclidean Distance (standardized feature space)")
+        axes[0].set_ylabel("Count")
+
+        axes[1].hist(nn_distances, bins=80, color="#FF5722", alpha=0.7, edgecolor="white")
+        axes[1].set_title("Nearest-Neighbor Distance per User", fontsize=11, fontweight="bold")
+        axes[1].set_xlabel("1-NN Euclidean Distance (standardized)")
+        axes[1].set_ylabel("Number of Users")
+        axes[1].axvline(x=np.median(nn_distances), color="blue", linestyle="--", alpha=0.7,
+                        label=f"Median: {np.median(nn_distances):.3f}")
+        axes[1].legend()
+
         plt.tight_layout()
-        plt.savefig(FIGURES_DIR / "03_pairwise_distances.png", dpi=150)
+        plt.savefig(FIGURES_DIR / "03_pairwise_distances.png", dpi=PLOT_DPI)
         print(f"\n  Saved: {FIGURES_DIR / '03_pairwise_distances.png'}")
         plt.close()
 
@@ -437,7 +495,7 @@ def main():
         ax.set_title(f"Read Time vs Scroll Percentage (r={corr:.3f})", fontsize=12, fontweight="bold")
         ax.legend()
         plt.tight_layout()
-        plt.savefig(FIGURES_DIR / "04_rt_vs_sp_scatter.png", dpi=150)
+        plt.savefig(FIGURES_DIR / "04_rt_vs_sp_scatter.png", dpi=PLOT_DPI)
         print(f"  Saved: {FIGURES_DIR / '04_rt_vs_sp_scatter.png'}")
         plt.close()
 
@@ -465,6 +523,7 @@ def main():
     section("SUMMARY")
     # ===================================================================
 
+    elapsed = time.time() - t_start
     print(f"""
   Dataset: ebnerd_50k
   Train behaviors:   {len(df_beh_train):,} impressions, {df_beh_train[DEFAULT_USER_COL].n_unique():,} users
@@ -480,6 +539,8 @@ def main():
     02_history_distributions.png
     03_pairwise_distances.png
     04_rt_vs_sp_scatter.png
+
+  Total EDA time: {elapsed:.1f}s
 """)
 
 

@@ -301,27 +301,47 @@ Plus `hist_len` (number of articles in history) for a 5D feature space.
 
 ### Pairwise Distance Analysis
 
-We computed Euclidean distances between all pairs of 1,000 randomly sampled users in standardized feature space:
+We computed Euclidean distances between all pairs of 2,000 randomly sampled users in standardized feature space:
 
 | Metric | Value |
 |--------|-------|
-| Mean distance | 2.814 |
-| Median distance | 2.544 |
-| Min distance | 0.087 |
-| P05 | 0.993 |
-| P95 | 5.560 |
+| Mean distance | 2.832 |
+| Median distance | 2.593 |
+| Min distance | 0.049 |
+| P05 | 0.995 |
+| P95 | 5.493 |
+| Total pairs computed | 1,999,000 |
+| Computation time | 0.01s |
 
 **Interpretation:**
 
 - The distribution is approximately chi-distributed (expected for L2 distances in standardized multivariate space), with a mode around 1.8-2.0.
-- The **minimum distance of 0.087** means some user pairs are extremely close in behavioral space — but still distinguishable.
-- The **P05 at 0.993** means 5% of all user pairs are within ~1 standard deviation of each other. For a nearest-neighbor re-identification attack, what matters is whether each user's *closest* neighbor is far enough away to prevent matching.
+- The **minimum distance of 0.049** means some user pairs are extremely close in behavioral space — but still distinguishable.
+- The **P05 at 0.995** means 5% of all user pairs are within ~1 standard deviation of each other. For a nearest-neighbor re-identification attack, what matters is whether each user's *closest* neighbor is far enough away to prevent matching.
 - The bulk of the distribution (mode ~2, mean ~2.8) shows that most users are well-separated — but the left tail (distances < 1) is where re-identification becomes easy.
+
+### Nearest-Neighbor Analysis (1-NN per User)
+
+To directly quantify re-identification vulnerability, we computed each user's distance to their single closest neighbor:
+
+| Metric | Value |
+|--------|-------|
+| Mean 1-NN distance | 0.357 |
+| Median 1-NN distance | 0.314 |
+| Min 1-NN distance | 0.049 |
+| Max 1-NN distance | 4.455 |
+| Users with 1-NN < 0.1 | 20 (1.0%) |
+| Users with 1-NN < 0.5 | 1,680 (84.0%) |
+
+**Critical observations:**
+- **84% of users** are within 0.5 standardized units of their nearest neighbor. This means even with coarse behavioral statistics, users cluster closely — making precise fingerprinting through learned representations (MLP, LSTM) highly effective.
+- The **20 users with 1-NN < 0.1** represent the hardest cases for re-identification (nearly indistinguishable from at least one other user). Even these will likely become distinguishable in learned representation spaces.
+- The **median 1-NN of 0.314** establishes a critical threshold: randomized smoothing must add noise comparable to this distance to meaningfully disrupt fingerprints. With σ too small, the smoothing preserves neighborhood structure and re-identification succeeds.
 
 **Why this matters for our experiment:**
 - The 100% uniqueness confirms that privacy protection is *necessary* — without it, users are trivially identifiable from their behavioral summary statistics.
 - The pairwise distance distribution provides a baseline. After applying randomized smoothing, we can re-measure these distances in the *representation space* to quantify how much the smoothing degrades fingerprint distinctiveness.
-- The certified radius R from randomized smoothing needs to be calibrated relative to these distances. If R is much smaller than the typical nearest-neighbor distance, the smoothing won't provide meaningful privacy. If R is too large, predictions become useless.
+- The certified radius R from randomized smoothing needs to be calibrated relative to the 1-NN distances. If R is much smaller than the median 1-NN distance (0.314), the smoothing won't provide meaningful privacy. If R is too large, predictions become useless.
 
 ---
 
@@ -390,11 +410,57 @@ This consistency confirms:
 ### For Privacy (Randomized Smoothing & Re-identification Attacks)
 
 - **Re-identification risk is real and quantified**: 100% behavioral fingerprint uniqueness at coarse granularity. This is not a hypothetical risk — it's measurable.
-- **Pairwise distance baseline established**: Mode ~2.0, min ~0.09 in standardized space. The randomized smoothing certified radius needs to be calibrated against this distribution.
+- **Pairwise distance baseline established**: Mode ~2.0, min ~0.05 in standardized space. The randomized smoothing certified radius needs to be calibrated against this distribution.
+- **Nearest-neighbor vulnerability**: Median 1-NN distance of 0.314 means most users are close to at least one other user, yet 100% are still unique — the attack exploits this fine-grained structure.
 - **Attack surface is well-defined**: With 50K users and stable behavioral fingerprints, a nearest-neighbor re-identification attack is both feasible and meaningful.
+- **Negative control available**: A separate 10K-user blind test set (`ebnerd_blind_test`) with zero overlap provides a clean negative control — re-identification should yield ~0% on users the model has never seen, proving the attack specifically fingerprints known users.
 - **Privacy-utility tradeoff is measurable**: We have clear "before" metrics (uniqueness ratio, pairwise distances, attack accuracy without smoothing) that we can compare against "after" metrics (same measures with smoothing applied at various noise levels).
 
 ---
+
+## Blind Test Set (Negative Control)
+
+In addition to the main `ebnerd_50k` dataset, we created `ebnerd_blind_test` — a 10,000-user set with **zero overlap** to the 50K training/validation users. See `src/01b_create_blind_test.py`.
+
+### Construction
+- Candidate pool: 573,933 users in `ebnerd_large` who appear in both time periods but are NOT in `ebnerd_50k`
+- Sampled 10,000 users (seed=123, different from 50k's seed=42)
+- Zero overlap verified programmatically (assertion-guarded)
+
+### Statistics Comparison
+
+| Metric | ebnerd_50k (train) | blind_test (train) | Delta |
+|--------|-------------------|-------------------|-------|
+| Engagement rate | 40.2% | 40.5% | +0.3% |
+| Read time mean | 68.2s | 68.0s | -0.2s |
+| Scroll % mean | 69.1% | 69.2% | +0.1% |
+| Labelable rate | 88.8% | 89.1% | +0.3% |
+| Avg impressions/user | 15.3 | 17.7 | +2.4 |
+
+The blind test is statistically indistinguishable from the main dataset — same time periods, same schema, same engagement patterns, but completely different users.
+
+### Use Cases
+1. **Negative control for re-identification**: Attack accuracy should be ~0% on these 10K users
+2. **Engagement generalization**: AUC on blind test validates model isn't overfitting to known users
+3. **Privacy amplification baseline**: Smoothing effects measured on unknown users provide a true baseline
+
+---
+
+---
+
+## Execution Environment
+
+| Component | Value |
+|-----------|-------|
+| Python | 3.11.14 |
+| Polars | 1.38.1 |
+| NumPy | 2.3.5 |
+| PyTorch | 2.10.0+cu128 |
+| Platform | Windows 11 Home (Build 26200) |
+| CPU | Intel Core Ultra 9 275HX (24 cores) |
+| RAM | 64 GB |
+| GPU | NVIDIA GeForce RTX 5070 Ti Laptop GPU (12 GB, CUDA 12.8) |
+| Total EDA time | 3.5s |
 
 *Generated by `src/00_eda.py` on the `ebnerd_50k` dataset (50,000 users, constructed via `src/01_create_50k_dataset.py`).*
 *Figures saved to `outputs/figures/`.*

@@ -20,7 +20,7 @@ Outputs (to outputs/models/smoothing/):
   - {model}/recommended_sigma_detail.png: Detail at recommended sigma
 
 Usage:
-    source .venv/bin/activate
+    conda activate privacy
     python src/06_randomized_smoothing.py
     python src/06_randomized_smoothing.py --mlp-only    # if LSTM not yet trained
 """

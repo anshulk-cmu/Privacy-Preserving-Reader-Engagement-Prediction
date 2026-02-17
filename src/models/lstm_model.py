@@ -6,7 +6,7 @@ the temporal dimension, fused with article/context/aggregate features,
 producing a 64-dim user representation for privacy experiments.
 
 v2 changes over v1:
-  - Replaced pack_padded_sequence with direct masking (5-10x faster on MPS)
+  - Replaced pack_padded_sequence with direct masking (faster on GPU)
   - Added aggregate features to the context branch (global user profile)
   - Parameterized article_cont_dim (now 5: premium, sentiment, body/title/subtitle len)
   - Reduced lstm_dropout default from 0.3 to 0.15
@@ -95,7 +95,7 @@ class LSTMEngagementModel(nn.Module):
             nn.SiLU(),
         )
 
-        # Bidirectional LSTM (no packing -- uses masking for MPS compatibility)
+        # Bidirectional LSTM (no packing -- uses masking for variable-length sequences)
         self.lstm = nn.LSTM(
             input_size=proj_dim,
             hidden_size=lstm_hidden,
@@ -172,7 +172,7 @@ class LSTMEngagementModel(nn.Module):
     def _encode_sequence(self, batch: dict) -> torch.Tensor:
         """
         Encode behavioral sequence via BiLSTM + attention pooling.
-        Uses masking instead of pack_padded_sequence for MPS compatibility.
+        Uses masking instead of pack_padded_sequence for variable-length sequences.
 
         Returns:
             (B, lstm_hidden*2) pooled sequence representation.
@@ -184,7 +184,7 @@ class LSTMEngagementModel(nn.Module):
         # Project input features
         proj = self.input_proj(seq)          # (B, T, proj_dim)
 
-        # Run LSTM directly (no packing -- masking is faster on MPS)
+        # Run LSTM directly (no packing -- masking for variable-length sequences)
         lstm_out, _ = self.lstm(proj)        # (B, T, lstm_hidden*2)
 
         # Create attention mask for padded positions

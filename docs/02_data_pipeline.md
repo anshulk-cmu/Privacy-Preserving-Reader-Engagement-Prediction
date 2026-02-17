@@ -31,7 +31,7 @@ Phase 2 transforms the raw `ebnerd_50k` parquet files into model-ready numpy arr
 - `src/data/dataset.py` -- PyTorch `EngagementDataset` class + `DataLoader` factory with custom collation
 
 **Input:** `data/ebnerd_50k/` (raw parquet files, 291 MB)
-**Output:** `data/processed/` (numpy arrays + scalers + metadata, 557 MB)
+**Output:** `data/processed/` (numpy arrays + scalers + metadata, 595 MB)
 
 ---
 
@@ -56,7 +56,7 @@ behaviors.parquet + history.parquet + articles.parquet
     |                                    |
     v                                    v
 [5] Compute aggregate features     [6] Normalize sequences
-    (N, 21) for MLP                    log1p + StandardScaler for RT
+    (N, 27) for MLP                    log1p + StandardScaler for RT
     |                                  /100 for SP
     v                                  |
 [7] StandardScaler (fit on train)      v
@@ -172,7 +172,7 @@ Based on the inspection, we selected three feature groups:
 - Median user history is 92 articles, but 88.5% of samples truncate at exactly 50
 - Most recent behavior is the strongest predictor of near-future engagement
 - Keeps LSTM sequence length manageable (training cost scales linearly with sequence length)
-- Full-history statistics are still captured in the 21 aggregate features for the MLP
+- Full-history statistics are still captured in the 27 aggregate features for the MLP
 
 **Results:**
 
@@ -182,7 +182,7 @@ Based on the inspection, we selected three feature groups:
 | Min actual length | 5 | 5 |
 | Max actual length | 50 | 50 |
 | Mean actual length | 47.2 | 46.6 |
-| Rows at full length 50 | 88.5% | 87.2% |
+| Rows at full length 50 | 88.5% | 85.9% |
 | Rows with no history | 0 | 0 |
 
 **Verification:** Five random rows were spot-checked by comparing the saved scroll_percentage/100 values against raw parquet data (last N items from `scroll_percentage_fixed`). All matched exactly. Padding positions were confirmed to be all zeros across 1,000 checked rows.
@@ -219,7 +219,7 @@ All 27 aggregate features are normalized via a single StandardScaler fitted on t
 ### No data leakage
 
 Validation data uses the **train-fitted** scalers:
-- Val aggregate features: mean = 0.037 (not 0), std = 0.994 (not 1) -- confirms no refitting
+- Val aggregate features: mean = 0.033 (not 0), std = 0.999 (not 1) -- confirms no refitting
 - Val RT history: mean = 0.011, std = 0.980 -- confirms train scaler applied
 
 ---
@@ -282,7 +282,7 @@ Zero rows had all-zero article features (every impression had a valid clicked ar
 
 | Feature | Type | Values |
 |---------|------|--------|
-| `device_type` | Float | {1.0, 2.0, 3.0} |
+| `device_type` | Float | {0.0, 1.0, 2.0, 3.0} (train: {1,2,3}; val adds 0) |
 | `is_subscriber` | Float | {0.0, 1.0} |
 | `is_sso_user` | Float | {0.0, 1.0} |
 
@@ -345,13 +345,13 @@ Each batch is a dict with these keys:
 | `label` | (B,) | float32 | Both (target) |
 | `user_id` | (B,) | int64 | Privacy experiments |
 
-Batch size: 512. At this size, train = 1,067 batches/epoch, val = 1,110 batches/epoch. Batch loading takes ~7.4ms -- well under the compute budget.
+Batch size: 512. At this size, train = 1,067 batches/epoch, val = 1,110 batches/epoch. Batch loading takes ~12.5ms on Windows (memory-mapped numpy arrays) -- well under the compute budget.
 
 ---
 
 ## 11. Verification and Audit Results
 
-We ran 9 systematic audits on the processed data. All passed.
+We ran 11 systematic audits on the processed data. All passed.
 
 ### Audit 1: Label correctness
 - Recomputed labels independently from raw parquets
@@ -384,12 +384,13 @@ We ran 9 systematic audits on the processed data. All passed.
 
 ### Audit 6: Context feature extraction
 - 3 spot-checked rows match raw behaviors.parquet values
-- device_type has 3 values, subscriber and SSO are binary -- correct
+- device_type: 3 values in train ({1,2,3}), 4 in val ({0,1,2,3}); subscriber and SSO are binary -- correct
 - **Result: PASS**
 
 ### Audit 7: No train/val data leakage
-- Val aggregate mean = 0.037 (not 0) -- train scaler applied, not refitted
-- Val RT mean = 0.011 -- same confirmation
+- Val aggregate mean = 0.033 (not 0) -- train scaler applied, not refitted
+- Val aggregate std = 0.999 (not exactly 1.0) -- confirms train scaler applied
+- Val RT mean = 0.009 -- same confirmation
 - **Result: PASS (no leakage)**
 
 ### Audit 8: User ID consistency
@@ -399,8 +400,20 @@ We ran 9 systematic audits on the processed data. All passed.
 - **Result: PASS**
 
 ### Audit 9: Data cleanliness
-- All 12 numpy arrays (6 per split) checked for NaN and Inf
+- All 14 numpy arrays (7 per split: history_seq, history_lengths, agg_features, article_features, context_features, labels, user_ids) checked for NaN and Inf
 - Zero NaN, zero Inf across all arrays
+- **Result: PASS**
+
+### Audit 10: Sequence padding
+- 1,000 random rows checked: all padding positions (beyond actual history length) are zero
+- **Result: PASS**
+
+### Audit 11: DataLoader batch format
+- All 9 shape checks passed against model expectations
+- All 9 dtype checks passed (float32 for continuous, int64 for indices/ids)
+- article_cat max = 31 (< 32 categories), article_type max = 12 (< 16 types)
+- Labels are binary {0.0, 1.0} only
+- Full epoch iteration: 1,067 batches in 13.4s (12.5 ms/batch)
 - **Result: PASS**
 
 ---
@@ -445,6 +458,36 @@ The history contains article IDs for past articles, and we could learn per-artic
 
 ---
 
+---
+
+## Execution Environment
+
+| Component | Value |
+|-----------|-------|
+| Python | 3.11.14 |
+| Polars | 1.38.1 |
+| NumPy | 2.3.5 |
+| PyTorch | 2.10.0+cu128 |
+| Platform | Windows 11 Home (Build 26200) |
+| CPU | Intel Core Ultra 9 275HX (24 cores) |
+| RAM | 64 GB |
+| GPU | NVIDIA GeForce RTX 5070 Ti Laptop GPU (12 GB, CUDA 12.8) |
+| Preprocessing time | 302.4s |
+| DataLoader validation time | 13.5s |
+| Output disk size | 595 MB |
+
+### Performance Breakdown
+
+| Stage | Time | Notes |
+|-------|------|-------|
+| Loading + filtering | 0.5s | Polars parallel I/O |
+| Sequence extraction | 10.6s | 1.1M rows, last-50 truncation |
+| Sequence normalization | 36.3s | log1p + StandardScaler per-position |
+| Aggregate features | 250.4s | 27 features per sample, Python loop |
+| Article + context | <1s | Lookup + extract |
+| Saving + verification | 4.6s | ~595 MB total |
+
+The aggregate feature computation dominates runtime due to per-row Python iteration over 1.1M samples. This is a one-time cost and could be optimized with vectorized Polars operations if needed.
+
 *Generated by `src/data/preprocessing.py` and validated by `src/data/dataset.py`.*
-*Processed data saved to `data/processed/` (557 MB).*
-*Runtime: ~128 seconds on Apple M3 Max.*
+*Processed data saved to `data/processed/` (595 MB).*

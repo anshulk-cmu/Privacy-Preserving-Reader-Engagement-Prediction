@@ -17,14 +17,20 @@ Additional outputs:
   - reidentification_results.json: all numerical results
 
 Usage:
-    source .venv/bin/activate
+    conda activate privacy
     python src/05_lstm_reidentification.py
 """
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
+
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
 import matplotlib
 matplotlib.use("Agg")
@@ -283,7 +289,7 @@ def plot_lstm_vs_mlp_comparison(
         f"{'Median Rank':<25s} {lstm_results['median_rank']:>10.0f} {mlp_results['median_rank']:>10.0f}\n"
         f"{'Lift over Random':<25s} {lstm_lift:>9.0f}x {mlp_lift:>9.0f}x\n"
         f"{'-'*45}\n"
-        f"{'Parameters':<25s} {'~1.0M':>10s} {'~207K':>10s}\n"
+        f"{'Parameters':<25s} {'~1.03M':>10s} {'~210K':>10s}\n"
         f"{'Input':<25s} {'Sequences':>10s} {'Aggregates':>10s}\n"
     )
     ax.text(0.02, 0.95, summary, transform=ax.transAxes,

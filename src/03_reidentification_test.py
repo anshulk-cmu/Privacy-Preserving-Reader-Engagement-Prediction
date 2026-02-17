@@ -19,14 +19,20 @@ training. If re-identification succeeds, it proves the model has learned
 user-distinctive behavioral patterns purely from reading statistics.
 
 Usage:
-    source .venv/bin/activate
+    conda activate privacy
     python src/03_reidentification_test.py
 """
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
+
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
 import matplotlib
 matplotlib.use("Agg")

@@ -8,24 +8,30 @@ Key differences from MLP training:
   - Uses history_seq (B, 50, 2) sequences + agg_features (B, 27) as context
   - Batch size 512, LR 8e-4, pct_start 0.3 (faster warmup)
   - skip_train_eval=False (full train eval each epoch for monitoring)
-  - Masking instead of pack_padded_sequence for MPS compatibility
+  - Masking instead of pack_padded_sequence for GPU compatibility
 
-v2 changes:
-  - Optimized hyperparameters (batch=512, lr=8e-4, weight_decay=3e-4)
-  - OneCycleLR pct_start=0.3 (reach peak LR by epoch ~3)
-  - LSTM dropout 0.15, max_epochs 30, patience 7
-  - num_workers=2 for parallel data loading
-  - Article features expanded to 5 continuous dims (body/title/subtitle length)
-  - Aggregate features (27-dim) fed to LSTM context branch
+Architecture: BiLSTM(2-layer, hidden=128) + 4-head self-attention + fusion MLP
+Features: history_seq (B,50,2) + 27 aggregate + 7 article + 3 context = ~1.03M params.
+Loss: LabelSmoothingBCE with pos_weight for class balance.
+50 max epochs, patience 8, full train-set evaluation each epoch.
 
 Usage:
-    source .venv/bin/activate
+    conda activate privacy
     python src/04_train_lstm.py
 """
 
+import os
 import sys
 import time
 from pathlib import Path
+
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
+import matplotlib
+matplotlib.use("Agg")
 
 import numpy as np
 import torch
@@ -44,20 +50,36 @@ from models.train import (
 )
 
 
+def print_system_info():
+    """Print system and hardware information."""
+    print("\n  System Information:")
+    print(f"    Python:  {sys.version.split()[0]}")
+    print(f"    PyTorch: {torch.__version__}")
+    print(f"    NumPy:   {np.__version__}")
+    print(f"    CUDA:    {torch.version.cuda if torch.cuda.is_available() else 'N/A'}")
+    if torch.cuda.is_available():
+        props = torch.cuda.get_device_properties(0)
+        print(f"    GPU:     {torch.cuda.get_device_name(0)} ({props.total_memory / 1024**3:.1f} GB)")
+    print(f"    CPU:     {os.cpu_count()} cores")
+
+
 def main():
+    overall_start = time.time()
     PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
     OUTPUT_DIR = PROJECT_ROOT / "outputs" / "models" / "lstm"
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     print("=" * 70)
-    print("  Phase 3B: BiLSTM + Attention Training (v2 — optimized)")
+    print("  Phase 3B: BiLSTM + Attention Training (v2 — 27 features, LabelSmoothingBCE)")
     print("=" * 70)
+    print_system_info()
 
     # ---- Load data ----
     print("\nLoading data...")
     metadata = load_metadata(PROCESSED_DIR)
     train_loader, val_loader, _ = get_dataloaders(
-        PROCESSED_DIR, batch_size=512, num_workers=2, pin_memory=True,
+        PROCESSED_DIR, batch_size=512, num_workers=0,
+        pin_memory=torch.cuda.is_available(),
     )
     print(f"  Train: {len(train_loader.dataset):,} samples, {len(train_loader):,} batches")
     print(f"  Val:   {len(val_loader.dataset):,} samples, {len(val_loader):,} batches")
@@ -91,8 +113,8 @@ def main():
         criterion=criterion,
         lr=8e-4,
         weight_decay=3e-4,
-        max_epochs=30,
-        patience=7,
+        max_epochs=50,
+        patience=8,
         max_grad_norm=1.0,
         pct_start=0.3,
         skip_train_eval=False,
@@ -144,14 +166,16 @@ def main():
     print(f"\n  Generating representation analysis plots...")
     plot_representation_analysis(
         val_user_ids, val_reprs, val_labels, OUTPUT_DIR,
-        model_name="LSTMEngagementModel",
+        model_name="LSTMEngagementModel v2 (27 features)",
     )
 
     # ---- Final summary ----
+    overall_time = time.time() - overall_start
     print(f"\n{'='*70}")
     print(f"  TRAINING COMPLETE")
     print(f"{'='*70}")
-    print(f"  Total time:       {train_time:.1f}s ({train_time/60:.1f} min)")
+    print(f"  Training time:    {train_time:.1f}s ({train_time/60:.1f} min)")
+    print(f"  Overall time:     {overall_time:.1f}s ({overall_time/60:.1f} min)")
     print(f"  Best epoch:       {results['best_epoch']}")
     print(f"  Best val AUC:     {results['best_val_auc']:.4f}")
     print(f"  Val F1:           {results['final_val_metrics']['f1']:.4f}")

@@ -8,7 +8,7 @@ This project investigates a hidden privacy risk in engagement prediction systems
 
 We demonstrate this risk using the EB-NeRD news recommendation dataset, then explore defenses using **Randomized Smoothing** to add mathematically calibrated noise that destroys the fingerprint signal while preserving predictive accuracy.
 
-**Key finding**: A BiLSTM model processing temporal reading sequences re-identifies users at **2,853x above random chance** among 28,361 users. Critically, upgrading from a simple MLP (314x lift) to the LSTM (+0.52% AUC) amplified re-identification risk by **9.1x** — demonstrating that **privacy risk scales non-linearly with model sophistication**.
+**Key finding**: Even a simple MLP trained on aggregate behavioral statistics re-identifies users at **69x above random chance** among 28,361 users — despite never being trained to identify anyone. A blind test on 10,000 completely unseen users confirms that fingerprinting is **feature-level** (24x lift), not model memorization. The LSTM amplifies this to **2,958x above random** (10.43% Top-1) with only a +0.24% AUC improvement, proving that **privacy risk scales non-linearly with model sophistication**. On the blind test, the LSTM achieves 841x lift on users it never trained on.
 
 ## Dataset
 
@@ -27,6 +27,21 @@ The dataset preserves the original **temporal split methodology** from the paper
 
 User overlap between train and validation is 76.2%, which is a natural consequence of the temporal design (users active in consecutive weeks appear in both splits).
 
+### Blind Test Set (Negative Control)
+
+We also constructed a **10,000-user blind test set** (`ebnerd_blind_test`) with **zero overlap** to the main 50K dataset (see `src/01b_create_blind_test.py`). These users were sampled from the 573,933 `ebnerd_large` users who are active in both time periods but absent from `ebnerd_50k`.
+
+| Split | Users | Impressions | Engagement Rate |
+|-------|-------|-------------|-----------------|
+| Train | 10,000 | 176,798 | 40.5% |
+| Validation | 10,000 | 173,534 | 41.3% |
+| **Overlap with ebnerd_50k** | **0** | — | — |
+
+This serves three purposes:
+1. **Negative control for re-identification**: The model never saw these users during training, so re-identification should yield ~0% accuracy — proving the attack specifically fingerprints *known* users.
+2. **Engagement generalization**: Verifies prediction performance holds on completely unseen users.
+3. **Privacy defense calibration**: Measures smoothing effects on unknown vs known users.
+
 ## Engagement Label
 
 We define binary engagement as:
@@ -41,34 +56,44 @@ This produces a well-balanced label (~40% positive, class ratio 1:1.5) that capt
 
 ### Engagement Prediction
 
-| Metric | LSTM (Val) | MLP (Val) | Improvement |
-|--------|-----------|-----------|-------------|
-| AUC-ROC | **0.6869** | 0.6817 | +0.0052 |
-| F1 Score | **0.5947** | 0.5694 | +0.0253 |
-| Recall | **0.6694** | 0.5844 | +0.0850 |
-| Precision | 0.5350 | **0.5551** | -0.0201 |
-| Accuracy | 0.6268 | **0.6384** | -0.0116 |
+| Metric | MLP (Val) | LSTM (Val) | Interpretation |
+|--------|-----------|------------|----------------|
+| AUC-ROC | 0.6951 | **0.6975** | LSTM ranks engaged users slightly better |
+| F1 Score | **0.5946** | 0.5888 | MLP slightly better on F1 |
+| Recall | **0.6495** | 0.6198 | MLP catches more engaged users |
+| Precision | 0.5483 | **0.5608** | LSTM has fewer false positives |
+| Accuracy | 0.6378 | **0.6459** | LSTM is more accurate overall |
 
-The LSTM surpasses the MLP baseline across ranking metrics (AUC, F1, recall) by processing raw temporal sequences and enriched features. Both models operate well within the expected range — the RecSys 2024 Challenge top-3 teams averaged 0.7643 AUC using full text embeddings, 1M+ users, and months of engineering.
+Both models use 27 aggregate behavioral features + 5 article features + 3 context features (67 dims after embeddings). The LSTM additionally processes raw behavioral sequences (50 timesteps x 2 features) through a BiLSTM + attention encoder. Both models operate well within the expected range — the RecSys 2024 Challenge top-3 averaged 0.7643 AUC using full text embeddings, 1M+ users, and months of engineering. Our behavioral-only models exceed the MIND NRMS benchmark (0.6776 AUC with text embeddings).
 
-### User Re-identification Attack — The Core Finding
+### User Re-identification Attack
 
-| Metric | LSTM (Best) | MLP (Best) | LSTM/MLP Ratio | Random |
-|--------|------------|------------|----------------|--------|
-| Top-1 Accuracy | **10.06%** | 1.11% | **9.1x** | 0.0035% |
-| Top-5 Accuracy | **15.30%** | 1.94% | **7.9x** | 0.018% |
-| Top-10 Accuracy | **17.86%** | 2.45% | **7.3x** | 0.035% |
-| Top-20 Accuracy | **20.73%** | 3.18% | **6.5x** | 0.071% |
-| MRR | **0.1280** | 0.0168 | **7.6x** | 0.0004 |
-| Lift over random | **2,853x** | 314x | **9.1x** | 1x |
-| Users 100% identifiable | 231 | 34 | 6.8x | 0 |
+| Metric | LSTM (Best) | MLP (Best) | Random | LSTM Lift | MLP Lift |
+|--------|------------|------------|--------|-----------|----------|
+| Top-1 Accuracy | **10.43%** | 0.24% | 0.0035% | **2,958x** | 69x |
+| Top-5 Accuracy | **16.03%** | 0.61% | 0.018% | **907x** | 35x |
+| Top-10 Accuracy | **18.77%** | 0.95% | 0.035% | **536x** | 27x |
+| Top-20 Accuracy | **21.82%** | 1.46% | 0.071% | **307x** | 21x |
+| MRR | **0.1334** | 0.0058 | 0.0004 | **334x** | 15x |
+| Median Rank | **1,126** | 3,121 | ~14,180 | -- | -- |
+| Users 100% identifiable | **220** | 2 | 0 | -- | -- |
 
-**Key finding**: A +0.52% AUC improvement (0.6817 → 0.6869) produced a **9.1x increase in re-identification risk** (314x → 2,853x lift). The LSTM's temporal behavioral sequences create dramatically more distinctive fingerprints than the MLP's aggregate statistics — demonstrating that **privacy risk scales non-linearly with model sophistication**.
+**Key finding**: The LSTM re-identifies users at **2,958x above random** (10.43% Top-1 among 28,361 users) — **43.1x stronger** than the MLP (69x lift). A mere +0.24% AUC improvement produces 43x more identifiable representations, demonstrating the extreme non-linearity between model quality and privacy risk.
+
+### Blind Test Validation (10K unseen users, zero overlap)
+
+| Experiment | LSTM | MLP | Implication |
+|-----------|------|-----|-------------|
+| Engagement generalization | AUC **0.7058** | AUC **0.7030** | Both models generalize well to unseen users |
+| Within-blind re-identification | **841x** above random (9.13% Top-1) | **24x** above random (0.26% Top-1) | LSTM fingerprinting is 35x stronger, both feature-level |
+| Cross-dataset negative control | **0.0000%** Top-1 | **0.0000%** Top-1 | Attack is methodologically sound for both |
+
+The blind test proves that both models create transferable behavioral fingerprints — the privacy risk is inherent to the feature representation, not an artifact of training exposure. The LSTM's temporal processing amplifies the fingerprinting signal by **35x** over the MLP on completely unseen users, confirming that **privacy risk scales dramatically with model sophistication**.
 
 ## Project Structure
 
 ```
-94806_term_project/
+Privacy-Preserving-Reader-Engagement-Prediction/
 ├── README.md                        # This file
 ├── requirements.txt                 # Python dependencies
 ├── docs/
@@ -86,6 +111,14 @@ The LSTM surpasses the MLP baseline across ranking metrics (AUC, F1, recall) by 
 │   │   │   ├── behaviors.parquet
 │   │   │   └── history.parquet
 │   │   └── articles.parquet
+│   ├── ebnerd_blind_test/           # 10K-user blind test (zero overlap with 50K)
+│   │   ├── train/
+│   │   │   ├── behaviors.parquet
+│   │   │   └── history.parquet
+│   │   ├── validation/
+│   │   │   ├── behaviors.parquet
+│   │   │   └── history.parquet
+│   │   └── articles.parquet
 │   └── processed/                   # Model-ready numpy arrays
 │       ├── train/                   # history_seq, agg_features, labels, etc.
 │       ├── val/                     # Same structure as train
@@ -95,17 +128,20 @@ The LSTM surpasses the MLP baseline across ranking metrics (AUC, F1, recall) by 
 ├── src/
 │   ├── 00_eda.py                    # Exploratory data analysis
 │   ├── 01_create_50k_dataset.py     # Script that built ebnerd_50k
+│   ├── 01b_create_blind_test.py     # Script that built ebnerd_blind_test (10K, zero overlap)
 │   ├── 02_train_mlp.py              # MLP training + representation extraction
-│   ├── 03_reidentification_test.py  # Blind user re-identification attack (MLP)
+│   ├── 03_reidentification_test.py  # Re-identification attack on 50K val users (MLP)
+│   ├── 03b_blind_test_evaluation.py # Blind test: engagement + re-id on 10K unseen users
 │   ├── 04_train_lstm.py             # LSTM training + representation extraction
-│   ├── 05_lstm_reidentification.py  # Blind user re-identification attack (LSTM)
+│   ├── 05_lstm_reidentification.py  # LSTM re-identification attack + MLP comparison
+│   ├── 05b_lstm_blind_test.py       # Blind test: engagement + re-id on 10K unseen users (LSTM)
 │   ├── data/
 │   │   ├── __init__.py
 │   │   ├── preprocessing.py         # Load parquets, engineer features, normalize
 │   │   └── dataset.py               # PyTorch Dataset + DataLoader
 │   └── models/
 │       ├── __init__.py
-│       ├── mlp_baseline.py          # Deep MLP engagement model (207K params, frozen)
+│       ├── mlp_baseline.py          # Deep MLP engagement model (210K params)
 │       ├── lstm_model.py            # BiLSTM + Attention model (~1M params)
 │       ├── train.py                 # Training infrastructure, losses, plotting
 │       ├── attack.py                # Nearest-neighbor re-identification attack
@@ -123,7 +159,8 @@ The LSTM surpasses the MLP baseline across ranking metrics (AUC, F1, recall) by 
 │       │   ├── training_curves.png, evaluation_plots.png
 │       │   ├── reidentification_*.png
 │       │   ├── lstm_vs_mlp_comparison.png
-│       │   └── reidentification_results.json
+│       │   ├── reidentification_results.json
+│       │   └── blind_test_results.json
 │       └── smoothing/               # Randomized smoothing outputs (Phase 4)
 │           ├── smoothing_results.json
 │           ├── comparison/          # Cross-model comparison plots
@@ -143,33 +180,43 @@ The LSTM surpasses the MLP baseline across ranking metrics (AUC, F1, recall) by 
 ## Methodology
 
 ### Phase 1: Data & EDA (Complete)
-- Constructed 50K-user dataset preserving EB-NeRD temporal splits
+- Constructed 50K-user dataset preserving EB-NeRD temporal splits (seed=42 for reproducibility)
 - Analyzed engagement signal distributions, user history characteristics, and behavioral uniqueness
 - Confirmed 100% fingerprint uniqueness — strong motivation for privacy mechanisms
+- Enhanced nearest-neighbor analysis: median 1-NN distance of 0.314, 84% of users within 0.5 std of closest neighbor
+- Executed in 3.5s on 24-core CPU with Polars 1.38 (Windows 11, CUDA 12.8 verified)
 - Documentation: [docs/01_eda_analysis.md](docs/01_eda_analysis.md)
 
 ### Phase 2: Data Pipeline (Complete)
 - Built preprocessing pipeline: label creation, history extraction, feature engineering, normalization
 - 546K train / 568K val samples, 40% positive rate, no NaN/Inf, no train-to-val leakage
 - History sequences (50 timesteps x 2 features), 27 aggregate features, 7 article features, 3 context features
-- PyTorch Dataset and DataLoader with custom collation
+- PyTorch Dataset and DataLoader with custom collation (12.5 ms/batch, 1,067 batches/epoch)
+- 11 verification audits all passed (labels, cleanliness, leakage, padding, batch format)
+- Executed in 302s on 24-core CPU; output: 595 MB processed data
 - Documentation: [docs/02_data_pipeline.md](docs/02_data_pipeline.md)
 
 ### Phase 3A: MLP Baseline + Re-identification (Complete)
-- 6-layer deep MLP (207K params) with SiLU activations and residual connections
+- 6-layer deep MLP (210K params) with SiLU activations and residual connections
+- All 27 aggregate features + 5 article continuous + 3 context (67 input dims after embeddings)
 - LabelSmoothingBCE loss with pos_weight for class balance
-- AUC 0.6817, F1 0.57, balanced precision/recall
+- AUC 0.6951, F1 0.5946, recall 0.6495, precision 0.5483
 - 64-dim user representations extracted for privacy analysis
-- Blind re-identification attack: 314x above random (1.11% Top-1 among 28K users)
+- Re-identification attack: 69x above random (0.24% Top-1 among 28K users)
+- Blind test (10K unseen users): AUC 0.7030, within-blind re-id 24x above random, cross-dataset 0.0%
+- Proves fingerprinting is feature-level (not memorization) and model generalizes to unseen users
+- Trained in 25.7 min on RTX 5070 Ti (CUDA 12.8); early stopped at epoch 24, best at epoch 16
 - Documentation: [docs/03_mlp_baseline_analysis.md](docs/03_mlp_baseline_analysis.md)
 
 ### Phase 3B: LSTM Model + Re-identification (Complete)
-- 2-layer BiLSTM (1.0M params) with multi-head self-attention pooling
-- Consumes raw behavioral sequences (50 timesteps) + 27 aggregate features + article content lengths
-- Addresses three MLP information gaps: joint engagement rate, article body length, behavioral momentum
-- AUC 0.6869 (+0.0052 over MLP), trained in 25 epochs with 3.8x speedup over v1
-- **Re-identification: 2,853x above random** (10.06% Top-1 among 28K users) — **9.1x stronger than MLP**
-- A +0.52% AUC gain amplified re-identification risk by 9.1x, demonstrating non-linear privacy scaling
+- 2-layer BiLSTM (1.03M params) with 4-head multi-head self-attention pooling
+- Consumes raw behavioral sequences (50 timesteps x 2) + 27 aggregate features + 7 article features + 3 context features
+- Addresses the remaining MLP information gap: temporal patterns and sequential behavioral signatures
+- AUC 0.6975, F1 0.5888, recall 0.6198, precision 0.5608
+- Re-identification attack: **2,958x** above random (10.43% Top-1 among 28K users) — **43.1x stronger than MLP**
+- Blind test (10K unseen users): AUC 0.7058, within-blind re-id **841x** above random, cross-dataset 0.0%
+- Proves temporal sequences amplify fingerprinting by 35x over aggregate features on unseen users
+- Trained in 62.2 min on RTX 5070 Ti (CUDA 12.8); early stopped at epoch 26, best at epoch 18
 - Documentation: [docs/04_lstm_analysis.md](docs/04_lstm_analysis.md)
 
 ### Phase 4: Randomized Smoothing for Privacy (Code Complete — Awaiting Execution)
@@ -186,17 +233,33 @@ The LSTM surpasses the MLP baseline across ranking metrics (AUC, F1, recall) by 
 ## Setup
 
 ### Requirements
-- Python 3.11 (ARM-native on Apple Silicon)
-- Apple M3 Max or equivalent (MPS acceleration supported)
+- Python 3.11+
+- NVIDIA GPU with CUDA 12.x (tested: RTX 5070 Ti, 12 GB VRAM)
+- 16+ GB RAM recommended (64 GB used in development)
+
+### Tested Environment (Windows 11)
+
+| Component | Value |
+|-----------|-------|
+| OS | Windows 11 Home (Build 26200) |
+| Python | 3.11.14 |
+| PyTorch | 2.10.0+cu128 |
+| GPU | NVIDIA GeForce RTX 5070 Ti Laptop GPU (12 GB, CUDA 12.8) |
+| CPU | Intel Core Ultra 9 275HX (24 cores) |
+| Polars | 1.38.1 |
+| RAM | 64 GB |
 
 ### Installation
 
 ```bash
-# Create virtual environment
-python3.11 -m venv .venv
-source .venv/bin/activate
+# Create conda environment (recommended for CUDA support)
+conda create -n privacy python=3.11 -y
+conda activate privacy
 
-# Install dependencies
+# Install PyTorch with CUDA (Windows/Linux)
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+
+# Install other dependencies
 pip install -r requirements.txt
 
 # Install benchmark utilities
@@ -207,15 +270,15 @@ pip install -e ebnerd-benchmark/
 
 If you need to rebuild `ebnerd_50k` from scratch:
 
-1. Download `ebnerd_small` and `ebnerd_large` from [recsys.eb.dk](https://recsys.eb.dk/) into `data/` (temporary; deleted after creation)
-2. Extract both zip files
+1. Download `ebnerd_small` (80MB) and `ebnerd_large` (3.0GB) from [recsys.eb.dk](https://recsys.eb.dk/) into `data/`
+2. Extract both zip files into `data/ebnerd_small/` and `data/ebnerd_large/`
 3. Run: `python src/01_create_50k_dataset.py`
-4. Delete `ebnerd_large` to free disk space
+4. Delete `ebnerd_large` and the zip files to free disk space
 
 ### Running the Full Pipeline
 
 ```bash
-source .venv/bin/activate
+conda activate privacy
 
 # Step 1: EDA (outputs to outputs/figures/)
 python src/00_eda.py
@@ -232,11 +295,17 @@ python src/02_train_mlp.py
 # Step 5: MLP re-identification attack
 python src/03_reidentification_test.py
 
+# Step 5b: Blind test evaluation (engagement + re-id on 10K unseen users)
+python src/03b_blind_test_evaluation.py
+
 # Step 6: Train LSTM (outputs to outputs/models/lstm/)
 python src/04_train_lstm.py
 
 # Step 7: LSTM re-identification + MLP comparison
 python src/05_lstm_reidentification.py
+
+# Step 7b: LSTM blind test evaluation (engagement + re-id on 10K unseen users)
+python src/05b_lstm_blind_test.py
 
 # Step 8: Randomized smoothing privacy defense (Phase 4)
 python src/06_randomized_smoothing.py

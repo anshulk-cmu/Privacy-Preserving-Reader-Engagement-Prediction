@@ -1,0 +1,80 @@
+{
+  "engagement": {
+    "blind_val": {
+      "auc": 0.7058286887491234,
+      "f1": 0.5995491775838596,
+      "accuracy": 0.6495028617193757,
+      "precision": 0.5677252106286454,
+      "recall": 0.6351528143372791
+    },
+    "blind_train": {
+      "auc": 0.7122651755978363,
+      "f1": 0.6002858153102717,
+      "accuracy": 0.6557045233910522,
+      "precision": 0.5659813863036532,
+      "recall": 0.6390169693547881
+    }
+  },
+  "within_blind_reid": {
+    "cosine": {
+      "n_gallery_users": 9215,
+      "n_probes": 156977,
+      "metric": "cosine",
+      "top_k_accuracy": {
+        "1": 0.09131274008294209,
+        "5": 0.157698261528759,
+        "10": 0.19190072430993074,
+        "20": 0.22935207068551444
+      },
+      "mrr": 0.12642259268092637,
+      "mean_rank": 1234.13952999484,
+      "median_rank": 465.0,
+      "per_user_accuracy_mean": 0.08235426020688953,
+      "per_user_accuracy_std": 0.13767159649718202,
+      "per_user_accuracy_median": 0.0,
+      "users_with_100pct_reid": 11,
+      "users_with_0pct_reid": 5289
+    },
+    "euclidean": {
+      "n_gallery_users": 9215,
+      "n_probes": 156977,
+      "metric": "euclidean",
+      "top_k_accuracy": {
+        "1": 0.08474489893423877,
+        "5": 0.14828923982494252,
+        "10": 0.18128770456818516,
+        "20": 0.2181848296247221
+      },
+      "mrr": 0.11854280056506866,
+      "mean_rank": 1245.6457952438893,
+      "median_rank": 492.0,
+      "per_user_accuracy_mean": 0.07998642037072688,
+      "per_user_accuracy_std": 0.13901255477620852,
+      "per_user_accuracy_median": 0.0,
+      "users_with_100pct_reid": 11,
+      "users_with_0pct_reid": 5561
+    }
+  },
+  "cross_dataset_reid": {
+    "n_gallery": 39657,
+    "n_probes": 311182,
+    "top_k_accuracy": {
+      "1": 0.0,
+      "5": 0.0,
+      "10": 0.0,
+      "20": 0.0
+    },
+    "mrr": 0.0,
+    "mean_rank": 39658.0,
+    "median_rank": 39658.0
+  },
+  "baseline": {
+    "top_k_accuracy": {
+      "1": 0.00010851871947911015,
+      "5": 0.0005425935973955507,
+      "10": 0.0010851871947911015,
+      "20": 0.002170374389582203
+    },
+    "mrr": 0.0010532672591843522
+  }
+}
