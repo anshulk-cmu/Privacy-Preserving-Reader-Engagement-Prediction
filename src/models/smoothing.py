@@ -189,6 +189,7 @@ def compute_certified_radii(
 
     p = norm.cdf(logits / noise_std)        # P(engaged)
     p_A = np.maximum(p, 1.0 - p)            # majority class probability
+    p_A = np.clip(p_A, 0.5, 1.0 - 1e-12)    # avoid norm.ppf(0) or norm.ppf(1) = ±inf
 
     radii = sigma * norm.ppf(p_A)            # certified L2 radius
     radii = np.maximum(radii, 0.0)           # clip numerical artifacts
@@ -499,6 +500,7 @@ def monte_carlo_certify(
         p_A_lower = _clopper_pearson_lower(count_A, n_samples, alpha)
 
         if p_A_lower > 0.5:
+            p_A_lower = min(p_A_lower, 1.0 - 1e-12)  # avoid norm.ppf(1) = +inf
             mc_radii[i] = sigma * norm.ppf(p_A_lower)
         else:
             mc_radii[i] = 0.0
@@ -531,7 +533,350 @@ def monte_carlo_certify(
 
 
 # ---------------------------------------------------------------------------
-# 7. Sigma sweep orchestrator
+# 7. Monte Carlo utility evaluation (deployment-realistic noise injection)
+# ---------------------------------------------------------------------------
+
+def monte_carlo_utility(
+    representations: np.ndarray,
+    labels: np.ndarray,
+    w: np.ndarray,
+    b: float,
+    sigma: float,
+    n_trials: int = 50,
+    seed: int = 42,
+) -> dict:
+    """
+    Measure deployment-realistic utility under actual Gaussian noise injection.
+
+    For each trial, draws fresh noise ε ~ N(0, σ²I_d), computes
+    noisy_logits = (r + ε) @ w + b, and evaluates classification metrics.
+    This is Scenario B from the revised evaluation — single-draw noise.
+
+    Unlike analytical_smoothed_predict(), which preserves AUC by construction
+    (monotonic transform tautology), this measures genuine degradation because
+    each sample's noise draw independently perturbs its logit.
+
+    Args:
+        representations: (N, 64) representation vectors
+        labels: (N,) ground-truth binary labels
+        w: (64,) classification head weight
+        b: scalar classification head bias
+        sigma: Gaussian noise standard deviation (0 = clean)
+        n_trials: number of independent noise draws to average over
+        seed: random seed
+
+    Returns:
+        Dict with per-trial and aggregated metrics:
+        auc_mean, auc_std, auc_median, auc_p5, auc_p95,
+        f1_mean, f1_std, accuracy_mean, accuracy_std,
+        precision_mean, recall_mean, avg_precision_mean, n_trials.
+    """
+    if sigma <= 0:
+        # No noise — deterministic, return clean metrics as single trial
+        logits = representations @ w + b
+        probs = 1.0 / (1.0 + np.exp(-logits))
+        preds = (probs > 0.5).astype(int)
+        labels_int = labels.astype(int)
+        return {
+            "auc_mean": float(roc_auc_score(labels_int, probs)),
+            "auc_std": 0.0,
+            "auc_median": float(roc_auc_score(labels_int, probs)),
+            "auc_p5": float(roc_auc_score(labels_int, probs)),
+            "auc_p95": float(roc_auc_score(labels_int, probs)),
+            "f1_mean": float(f1_score(labels_int, preds, zero_division=0)),
+            "f1_std": 0.0,
+            "accuracy_mean": float(accuracy_score(labels_int, preds)),
+            "accuracy_std": 0.0,
+            "precision_mean": float(precision_score(labels_int, preds, zero_division=0)),
+            "precision_std": 0.0,
+            "recall_mean": float(recall_score(labels_int, preds, zero_division=0)),
+            "recall_std": 0.0,
+            "avg_precision_mean": float(average_precision_score(labels_int, probs)),
+            "avg_precision_std": 0.0,
+            "n_trials": 1,
+        }
+
+    rng = np.random.RandomState(seed)
+    labels_int = labels.astype(int)
+    N, d = representations.shape
+    w_norm = np.linalg.norm(w)
+
+    trial_aucs = []
+    trial_f1s = []
+    trial_accs = []
+    trial_precs = []
+    trial_recs = []
+    trial_aps = []
+
+    for _ in range(n_trials):
+        noise = rng.normal(0, sigma, (N, d))
+        noisy_logits = (representations + noise) @ w + b
+        noisy_probs = 1.0 / (1.0 + np.exp(-noisy_logits))
+        noisy_preds = (noisy_probs > 0.5).astype(int)
+
+        trial_aucs.append(float(roc_auc_score(labels_int, noisy_probs)))
+        trial_f1s.append(float(f1_score(labels_int, noisy_preds, zero_division=0)))
+        trial_accs.append(float(accuracy_score(labels_int, noisy_preds)))
+        trial_precs.append(float(precision_score(labels_int, noisy_preds, zero_division=0)))
+        trial_recs.append(float(recall_score(labels_int, noisy_preds, zero_division=0)))
+        trial_aps.append(float(average_precision_score(labels_int, noisy_probs)))
+
+    aucs = np.array(trial_aucs)
+    f1s = np.array(trial_f1s)
+    accs = np.array(trial_accs)
+    precs = np.array(trial_precs)
+    recs = np.array(trial_recs)
+    aps = np.array(trial_aps)
+
+    return {
+        "auc_mean": float(aucs.mean()),
+        "auc_std": float(aucs.std()),
+        "auc_median": float(np.median(aucs)),
+        "auc_p5": float(np.percentile(aucs, 5)),
+        "auc_p95": float(np.percentile(aucs, 95)),
+        "f1_mean": float(f1s.mean()),
+        "f1_std": float(f1s.std()),
+        "accuracy_mean": float(accs.mean()),
+        "accuracy_std": float(accs.std()),
+        "precision_mean": float(precs.mean()),
+        "precision_std": float(precs.std()),
+        "recall_mean": float(recs.mean()),
+        "recall_std": float(recs.std()),
+        "avg_precision_mean": float(aps.mean()),
+        "avg_precision_std": float(aps.std()),
+        "n_trials": n_trials,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 8. Logit statistics and SNR analysis
+# ---------------------------------------------------------------------------
+
+def extract_logit_statistics(
+    representations: np.ndarray,
+    labels: np.ndarray,
+    w: np.ndarray,
+    b: float,
+) -> dict:
+    """
+    Compute logit distribution statistics for SNR analysis.
+
+    The signal-to-noise ratio SNR(σ) = std(logits) / (σ·‖w‖) predicts
+    how much noise affects predictions. Class-conditional statistics
+    (μ₊, μ₋, σ₊, σ₋) enable the bi-Gaussian AUC approximation.
+
+    Args:
+        representations: (N, 64)
+        labels: (N,) binary labels
+        w: (64,) head weight
+        b: scalar head bias
+
+    Returns:
+        Dict with ‖w‖, b, overall and class-conditional logit statistics.
+    """
+    logits = representations @ w + b
+    labels_int = labels.astype(int)
+    w_norm = float(np.linalg.norm(w))
+
+    pos_mask = labels_int == 1
+    neg_mask = labels_int == 0
+    logits_pos = logits[pos_mask]
+    logits_neg = logits[neg_mask]
+
+    return {
+        "w_norm": w_norm,
+        "b": float(b),
+        "logit_mean": float(logits.mean()),
+        "logit_std": float(logits.std()),
+        "logit_min": float(logits.min()),
+        "logit_max": float(logits.max()),
+        "logit_median": float(np.median(logits)),
+        # Class-conditional statistics
+        "mu_pos": float(logits_pos.mean()),
+        "mu_neg": float(logits_neg.mean()),
+        "std_pos": float(logits_pos.std()),
+        "std_neg": float(logits_neg.std()),
+        "delta_mu": float(logits_pos.mean() - logits_neg.mean()),
+        "n_pos": int(pos_mask.sum()),
+        "n_neg": int(neg_mask.sum()),
+        # Derived quantities
+        "snr_at_sigma_1": float(logits.std() / w_norm) if w_norm > 0 else float("inf"),
+        # Raw logits for plotting (not serialized to JSON)
+        "_logits": logits,
+        "_logits_pos": logits_pos,
+        "_logits_neg": logits_neg,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 9. Bi-Gaussian analytical AUC prediction
+# ---------------------------------------------------------------------------
+
+def analytical_auc_prediction(
+    logit_stats: dict,
+    sigma_values: list,
+) -> dict:
+    """
+    Predict MC AUC analytically using the bi-Gaussian model.
+
+    Models the logit distributions for positive and negative classes as
+    Gaussian, then computes the expected AUC under additive noise:
+
+        AUC(σ) ≈ Φ(Δμ / √(σ₊² + σ₋² + 2σ²‖w‖²))
+
+    This is the standard bi-normal AUC formula with noise variance added.
+
+    Args:
+        logit_stats: output of extract_logit_statistics()
+        sigma_values: list of sigma values
+
+    Returns:
+        Dict mapping sigma → predicted AUC, plus the formula parameters.
+    """
+    delta_mu = logit_stats["delta_mu"]
+    std_pos = logit_stats["std_pos"]
+    std_neg = logit_stats["std_neg"]
+    w_norm = logit_stats["w_norm"]
+
+    predicted = {}
+    for sigma in sigma_values:
+        noise_var = sigma * sigma * w_norm * w_norm
+        denom = np.sqrt(std_pos**2 + std_neg**2 + 2 * noise_var)
+        if denom > 0:
+            predicted_auc = float(norm.cdf(delta_mu / denom))
+        else:
+            predicted_auc = float(norm.cdf(float("inf") if delta_mu > 0 else float("-inf")))
+        predicted[str(sigma)] = predicted_auc
+
+    return {
+        "predicted_auc": predicted,
+        "delta_mu": delta_mu,
+        "std_pos": std_pos,
+        "std_neg": std_neg,
+        "w_norm": w_norm,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 10. Multi-draw aggregation experiment (Scenario C)
+# ---------------------------------------------------------------------------
+
+def aggregated_prediction_utility(
+    representations: np.ndarray,
+    labels: np.ndarray,
+    user_ids: np.ndarray,
+    w: np.ndarray,
+    b: float,
+    sigma_values: list,
+    m_values: list,
+    n_trials: int = 20,
+    n_reid_trials: int = 5,
+    reid_metric: str = "cosine",
+    seed: int = 42,
+    verbose: bool = True,
+) -> list:
+    """
+    Map the 2D (σ, M) tradeoff surface for multi-draw aggregation.
+
+    For M draws per query:
+      - Utility: averaged sigmoid scores → AUC improves with M
+      - Privacy: averaged representations (effective noise σ/√M) → privacy degrades with M
+
+    This exposes the fundamental utility-privacy coupling that single-draw
+    evaluation misses.
+
+    Args:
+        representations: (N, 64)
+        labels: (N,) binary labels
+        user_ids: (N,) user IDs for re-id attack
+        w: (64,) head weight
+        b: scalar head bias
+        sigma_values: list of sigma values to test
+        m_values: list of M (number of draws) values
+        n_trials: number of outer trials for utility averaging
+        n_reid_trials: number of trials for re-id attack
+        reid_metric: distance metric for re-id
+        seed: random seed
+        verbose: print progress
+
+    Returns:
+        List of dicts, one per (σ, M) pair, with utility and privacy metrics.
+    """
+    from models.attack import build_gallery_probe_split, run_reidentification_attack
+
+    rng = np.random.RandomState(seed)
+    labels_int = labels.astype(int)
+    N, d = representations.shape
+    results = []
+
+    for sigma in sigma_values:
+        for M in m_values:
+            if verbose:
+                print(f"    Aggregation: σ={sigma}, M={M}")
+
+            # --- Utility: averaged scores ---
+            trial_aucs = []
+            for t in range(n_trials):
+                scores_sum = np.zeros(N)
+                for m in range(M):
+                    noise = rng.normal(0, sigma, (N, d))
+                    noisy_logits = (representations + noise) @ w + b
+                    scores_sum += 1.0 / (1.0 + np.exp(-noisy_logits))
+                avg_scores = scores_sum / M
+                trial_aucs.append(float(roc_auc_score(labels_int, avg_scores)))
+
+            auc_arr = np.array(trial_aucs)
+
+            # --- Privacy: re-id on averaged representations ---
+            # Effective noise is σ/√M
+            reid_lifts = []
+            reid_top1s = []
+
+            for t in range(n_reid_trials):
+                rep_sum = np.zeros_like(representations)
+                for m in range(M):
+                    noise = rng.normal(0, sigma, (N, d))
+                    rep_sum += representations + noise
+                avg_reps = rep_sum / M  # effective noise std = σ/√M
+
+                split = build_gallery_probe_split(
+                    user_ids, avg_reps, labels,
+                    min_impressions=4,
+                    gallery_fraction=0.5,
+                    seed=42,
+                )
+                result = run_reidentification_attack(
+                    split["gallery_profiles"],
+                    split["gallery_user_ids"],
+                    split["probe_reprs"],
+                    split["probe_user_ids"],
+                    metric=reid_metric,
+                    top_k_values=(1, 5, 10),
+                    batch_size=2000,
+                )
+                reid_top1s.append(result["top_k_accuracy"]["1"])
+
+            results.append({
+                "sigma": sigma,
+                "M": M,
+                "effective_sigma": sigma / np.sqrt(M),
+                "auc_mean": float(auc_arr.mean()),
+                "auc_std": float(auc_arr.std()),
+                "reid_top1_mean": float(np.mean(reid_top1s)),
+                "reid_top1_std": float(np.std(reid_top1s)),
+                "n_utility_trials": n_trials,
+                "n_reid_trials": n_reid_trials,
+            })
+
+            if verbose:
+                print(f"      AUC={auc_arr.mean():.4f}±{auc_arr.std():.4f}, "
+                      f"Re-id Top1={np.mean(reid_top1s)*100:.3f}%")
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# 11. Sigma sweep orchestrator
 # ---------------------------------------------------------------------------
 
 def run_sigma_sweep(
@@ -543,13 +888,15 @@ def run_sigma_sweep(
     sigma_values: list,
     reid_metric: str = "cosine",
     n_reid_trials: int = 10,
+    mc_utility_trials: int = 50,
     verbose: bool = True,
 ) -> list:
     """
     Run the full sigma sweep for one model.
 
     For each sigma, computes:
-      - Utility: analytical smoothed AUC, F1, accuracy
+      - Utility (analytical): smoothed AUC — upper bound (tautologically preserved)
+      - Utility (MC): deployment-realistic AUC under actual noise injection
       - Privacy: noisy re-identification Top-K, MRR, lift
       - Certification: per-sample certified radii
 
@@ -562,6 +909,7 @@ def run_sigma_sweep(
         sigma_values: list of sigma values to sweep
         reid_metric: distance metric for re-id attack
         n_reid_trials: noise draws for re-id averaging
+        mc_utility_trials: noise draws for MC utility evaluation
         verbose: print progress
 
     Returns:
@@ -573,15 +921,23 @@ def run_sigma_sweep(
         if verbose:
             print(f"\n  --- σ = {sigma} ({i+1}/{len(sigma_values)}) ---")
 
-        # Utility
+        # Analytical utility (upper bound — tautologically preserves AUC)
         if verbose:
-            print(f"    Computing smoothed predictions...")
+            print(f"    Computing analytical smoothed predictions (upper bound)...")
         utility = analytical_smoothed_predict(representations, labels, w, b, sigma)
         utility_clean = {k: v for k, v in utility.items() if not k.startswith("_")}
 
+        # MC utility (deployment-realistic — actual noise injection)
         if verbose:
-            print(f"    AUC={utility['auc']:.4f}, F1={utility['f1']:.4f}, "
-                  f"Acc={utility['accuracy']:.4f}")
+            print(f"    Computing MC utility ({mc_utility_trials} trials)...")
+        mc_util = monte_carlo_utility(
+            representations, labels, w, b, sigma,
+            n_trials=mc_utility_trials,
+        )
+
+        if verbose:
+            print(f"    Analytical AUC={utility['auc']:.4f} (upper bound), "
+                  f"MC AUC={mc_util['auc_mean']:.4f}±{mc_util['auc_std']:.4f}")
 
         # Certification
         if verbose:
@@ -609,7 +965,17 @@ def run_sigma_sweep(
 
         results.append({
             "sigma": sigma,
-            "utility": utility_clean,
+            "utility_analytical": utility_clean,
+            "utility_mc": mc_util,
+            # Keep "utility" key pointing to MC for backward compat in plots
+            "utility": {
+                "auc": mc_util["auc_mean"],
+                "f1": mc_util["f1_mean"],
+                "accuracy": mc_util["accuracy_mean"],
+                "precision": mc_util["precision_mean"],
+                "recall": mc_util["recall_mean"],
+                "avg_precision": mc_util["avg_precision_mean"],
+            },
             "certification": cert_clean,
             "privacy": privacy,
         })
