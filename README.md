@@ -90,6 +90,20 @@ Both models use 27 aggregate behavioral features + 5 article features + 3 contex
 
 The blind test proves that both models create transferable behavioral fingerprints — the privacy risk is inherent to the feature representation, not an artifact of training exposure. The LSTM's temporal processing amplifies the fingerprinting signal by **35x** over the MLP on completely unseen users, confirming that **privacy risk scales dramatically with model sophistication**.
 
+### Randomized Smoothing Privacy Defense (σ = 1.0 Recommended)
+
+| Metric | MLP Clean | MLP @ σ=1.0 | Change | LSTM Clean | LSTM @ σ=1.0 | Change |
+|--------|-----------|-------------|--------|------------|--------------|--------|
+| MC AUC | 0.6951 | 0.6786 | **−2.4%** | 0.6975 | 0.6564 | **−5.9%** |
+| F1 | 0.5946 | 0.5824 | −2.1% | 0.5888 | 0.5609 | −4.7% |
+| Re-id Lift | 69x | 4.4x | **−93.6%** | 2,958x | 4.8x | **−99.8%** |
+| Certified R (median) | — | 1.603 | — | — | 0.889 | — |
+| R / NN distance | — | 59× | — | — | 4.3× | — |
+
+**Key finding**: At the recommended noise level σ=1.0, randomized smoothing reduces re-identification risk by **93-99.8%** while sacrificing only **2.4-5.9% AUC**. The linear classification head provides a geometric advantage: noise affects prediction only through a 1D projection (the w direction), while privacy operates in all 64 dimensions. This yields an effective privacy-to-utility noise ratio of **15-25×** (better than the theoretical √64 = 8× because ‖w‖ < 1).
+
+The **privacy paradox**: the LSTM's superior prediction (+0.24% AUC over MLP) costs 43× more re-identification risk (2,958x vs 69x) and 2.5× more AUC degradation under noise (5.9% vs 2.4%). When privacy matters, the simpler MLP is the better choice.
+
 ## Project Structure
 
 ```
@@ -224,19 +238,22 @@ Privacy-Preserving-Reader-Engagement-Prediction/
 - Trained in 62.2 min on RTX 5070 Ti (CUDA 12.8); early stopped at epoch 26, best at epoch 18
 - Documentation: [docs/04_lstm_analysis.md](docs/04_lstm_analysis.md)
 
-### Phase 4: Randomized Smoothing for Privacy (Code Complete — Awaiting Execution)
+### Phase 4: Randomized Smoothing for Privacy (Complete)
 - Add calibrated Gaussian noise ε ~ N(0, σ²I₆₄) to 64-dim learned representations
 - Analytical smoothed prediction: P = Φ(logit / (σ·‖w‖)) — exact for linear classification head
 - **Tautology audit**: Analytical AUC is a monotonic transform (preserves rankings by construction) — replaced with Monte Carlo noise injection for honest utility measurement
 - **Dual-evaluation framework**: Analytical AUC as upper bound + MC AUC (100-trial averaged) as deployment-realistic metric
 - Certified radius R = σ · Φ⁻¹(p_A) guarantees prediction stability (Cohen et al., ICML 2019)
-- Monte Carlo verification with Clopper-Pearson confidence bounds (α = 0.001)
+- Monte Carlo verification with Clopper-Pearson confidence bounds (α = 0.001, 2000 samples)
 - Sweep 11 noise levels (σ = 0 to 3.0) mapping the full privacy-utility tradeoff
-- **Aggregation tradeoff**: (σ × M) surface showing utility vs privacy coupling across multi-draw scenarios
-- **GPU-accelerated re-identification**: Full CUDA pipeline — pairwise distance (batched normalized matmul for cosine, `torch.cdist` for euclidean), `torch.argsort` for ranking, and vectorized broadcast rank-finding. ~15× end-to-end speedup per attack (~9s vs ~128s), enabling ~460 attacks per run in ~1.5 hours
-- Dual-metric NN distances (cosine for re-id, euclidean for L2 certification comparison)
-- Compare MLP vs LSTM: quantify how much more noise the LSTM needs for equivalent privacy
-- 10 visualization plots including privacy-utility Pareto frontier, aggregation surface, and SNR analysis (main deliverables)
+- **Aggregation tradeoff**: (σ × M) surface with 4σ × 6M = 24 cells showing utility vs privacy coupling
+- **GPU-accelerated re-identification**: Full CUDA pipeline — pairwise distance (batched normalized matmul for cosine, `torch.cdist` for euclidean), `torch.argsort` for ranking, and vectorized broadcast rank-finding. ~15× end-to-end speedup per attack (~9s vs ~128s), enabling ~460 attacks per run
+- **Key results at recommended σ=1.0**:
+  - MLP: AUC 0.6786 (−2.4%), re-id lift 69x → 4.4x (−93.6%), certified radius 1.603 (59× NN distance)
+  - LSTM: AUC 0.6564 (−5.9%), re-id lift 2,958x → 4.8x (−99.8%), certified radius 0.889 (4.3× NN distance)
+- **Privacy paradox confirmed**: LSTM degrades faster (‖w‖ = 0.529 vs 0.315, SNR 1.31 vs 2.27) — more capable models are harder to defend
+- 14 visualization plots: 6 comparison + 4 per-model (certified radii, recommended detail, SNR analysis, aggregation surface)
+- Executed in ~1.5 hours on RTX 5070 Ti (CUDA 12.8) with GPU-accelerated attack pipeline
 - Documentation: [docs/05_randomized_smoothing.md](docs/05_randomized_smoothing.md)
 
 ## Setup
