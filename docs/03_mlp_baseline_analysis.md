@@ -156,7 +156,7 @@ Result: Balanced precision (0.55) and recall (0.65), F1 = 0.59.
 The model trained for 24 epochs and was early-stopped. The best model was saved at epoch 16.
 
 - **Epochs 1-5**: Rapid improvement. Val AUC climbed from 0.6855 to 0.6918.
-- **Epochs 5-16**: Steady refinement. Val AUC improved from 0.6918 to 0.6951, with the model finding consistent improvements almost every epoch (10 out of 16 epochs were new bests).
+- **Epochs 5-16**: Steady refinement. Val AUC improved from 0.6918 to 0.6951, with the model finding consistent improvements almost every epoch (13 out of 16 epochs were new bests).
 - **Epochs 17-24**: Plateau. Val AUC fluctuated between 0.6925-0.6948 without surpassing the epoch 16 best. After 8 epochs without improvement, early stopping triggered.
 
 Early stopping correctly identified epoch 16 as the best point and restored those weights.

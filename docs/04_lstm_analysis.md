@@ -199,7 +199,7 @@ The LSTM trained for 26 epochs before early stopping (patience=8). Best model wa
 | 26 | 0.7573 | 0.7798 | 0.6921 | 0.6003 | early stop |
 
 Notable observations:
-- The LSTM **surpassed the MLP's 0.6951 AUC at epoch 15** (with consistent improvement from epoch 1)
+- The LSTM **surpassed the MLP's 0.6951 AUC at epoch 16** (with consistent improvement from epoch 1)
 - Steady improvement through the OneCycleLR warmup phase (epochs 1-15)
 - Peak performance at epoch 18 during the LR annealing phase
 - Clear overfitting signal in later epochs (train loss continued to decrease while val loss increased)
@@ -216,17 +216,17 @@ Notable observations:
 | Recall | 0.6277 | 0.6198 | +0.0079 |
 | Avg Precision | 0.6263 | 0.6112 | +0.0150 |
 
-The train-val AUC gap of 0.0155 is moderate and well within acceptable range for a model with 1.03M parameters. This is comparable to the MLP's 0.0083 gap, adjusted for the 5x parameter count increase.
+The train-val AUC gap of 0.0155 is moderate and well within acceptable range for a model with 1.03M parameters. This is comparable to the MLP's 0.016 gap, adjusted for the 5x parameter count increase.
 
 ### Representation Quality
 
 | Metric | LSTM | MLP |
 |--------|------|-----|
 | Repr dim | 64 | 64 |
-| Mean | 0.0061 | -0.0117 |
-| Std | **0.8126** | 0.4294 |
-| Min | -3.4860 | -2.2880 |
-| Max | 3.4320 | 2.2150 |
+| Mean | 0.0061 | 0.0070 |
+| Std | **0.8126** | 0.4290 |
+| Min | -3.4860 | -4.3100 |
+| Max | 3.4320 | 2.8500 |
 | Dead dims (std < 0.01) | **0** | 0 |
 | Low-var dims (std < 0.05) | 1 | 0 |
 
@@ -257,8 +257,8 @@ Epoch time: ~135-153s (vs ~62s for MLP), reflecting the BiLSTM sequential comput
 | Val Accuracy | **0.6459** | 0.6378 | **+0.0081** |
 | Val Precision | **0.5608** | 0.5483 | **+0.0125** |
 | Val Recall | 0.6198 | **0.6495** | -0.0297 |
-| Val Avg Precision | **0.6112** | 0.6109 | +0.0003 |
-| Parameters | 1,025,089 | 210,113 | 4.9x larger |
+| Val Avg Precision | **0.6112** | 0.6102 | +0.0010 |
+| Parameters | 1,025,089 | 209,665 | 4.9x larger |
 | Training time | 62.2 min | 25.7 min | 2.4x slower |
 
 ### Interpretation

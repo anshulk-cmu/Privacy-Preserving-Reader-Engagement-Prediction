@@ -149,6 +149,7 @@ Privacy-Preserving-Reader-Engagement-Prediction/
 │   ├── 04_train_lstm.py             # LSTM training + representation extraction
 │   ├── 05_lstm_reidentification.py  # LSTM re-identification attack + MLP comparison
 │   ├── 05b_lstm_blind_test.py       # Blind test: engagement + re-id on 10K unseen users (LSTM)
+│   ├── 06_randomized_smoothing.py   # Randomized smoothing privacy defense (Phase 4)
 │   ├── data/
 │   │   ├── __init__.py
 │   │   ├── preprocessing.py         # Load parquets, engineer features, normalize
@@ -167,11 +168,14 @@ Privacy-Preserving-Reader-Engagement-Prediction/
 │       │   ├── checkpoint.pt, metrics.json, representations.npz
 │       │   ├── training_curves.png, evaluation_plots.png
 │       │   ├── reidentification_*.png
-│       │   └── reidentification_results.json
+│       │   ├── representation_analysis.png
+│       │   ├── reidentification_results.json
+│       │   └── blind_test_results.json
 │       ├── lstm/                    # LSTM outputs (Phase 3B)
 │       │   ├── checkpoint.pt, metrics.json, representations.npz
 │       │   ├── training_curves.png, evaluation_plots.png
 │       │   ├── reidentification_*.png
+│       │   ├── representation_analysis.png
 │       │   ├── lstm_vs_mlp_comparison.png
 │       │   ├── reidentification_results.json
 │       │   └── blind_test_results.json

@@ -133,7 +133,7 @@ Based on the inspection, we selected three feature groups:
   - RT momentum, SP momentum, RT-SP correlation (3 features)
 
 ### Shared by both models
-- **Article features** (7 total): category index, article type index, premium flag, sentiment score, body_len_log, title_len_log, subtitle_len_log
+- **Article features** (7 total = 2 embedding indices + 5 continuous): category index, article type index, premium flag, sentiment score, body_len_log, title_len_log, subtitle_len_log
 - **Context features**: device type, is_subscriber, is_sso_user (3 features)
 
 ---
@@ -266,8 +266,8 @@ Looked up from `articles.parquet` using the **first article in `article_ids_clic
 
 | Feature | Type | Range | Notes |
 |---------|------|-------|-------|
-| `category_idx` | Int (for embedding) | [4, 31] | 32 possible categories; not all appear in clicked articles |
-| `article_type_idx` | Int (for embedding) | [1, 15] | 16 possible types; not all appear |
+| `category_idx` | Int (for embedding) | [0, 31] (observed: [4, 31]) | 32 possible categories mapped via `sorted()`; indices 0-3 exist in articles but not in clicked articles |
+| `article_type_idx` | Int (for embedding) | [0, 15] (observed: [1, 15]) | 16 possible types mapped via `sorted()`; index 0 not observed in clicked articles |
 | `premium` | Float | {0, 1} | Binary flag |
 | `sentiment_score` | Float | [0.395, 0.998] | Sentiment from NLP model |
 | `body_len_log` | Float | log1p(char count) | Article body length (log-transformed) |
@@ -282,7 +282,7 @@ Zero rows had all-zero article features (every impression had a valid clicked ar
 
 | Feature | Type | Values |
 |---------|------|--------|
-| `device_type` | Float | {0.0, 1.0, 2.0, 3.0} (train: {1,2,3}; val adds 0) |
+| `device_type` | Float | {0.0, 1.0, 2.0, 3.0} (train: {1,2,3}; val adds 0 — device_type 0 only appears in the validation week) |
 | `is_subscriber` | Float | {0.0, 1.0} |
 | `is_sso_user` | Float | {0.0, 1.0} |
 

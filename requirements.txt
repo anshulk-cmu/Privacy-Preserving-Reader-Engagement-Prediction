@@ -3,7 +3,6 @@
 
 # Deep learning
 torch>=2.0
-torchvision
 
 # Data processing
 polars>=1.0
