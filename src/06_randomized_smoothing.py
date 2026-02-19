@@ -2,22 +2,27 @@
 06_randomized_smoothing.py — Privacy-Utility Tradeoff via Randomized Smoothing
 ================================================================================
 Sweeps Gaussian noise levels on learned 64-dim representations, measuring:
-  - Utility: How much engagement prediction degrades (AUC, F1)
-  - Privacy: How much re-identification weakens (Top-K, MRR, lift)
+  - Utility (dual): Analytical upper bound + MC noise injection (deployment-realistic)
+  - Privacy: How much re-identification weakens (Top-K, MRR, lift) via GPU-accelerated attack
   - Certification: Formal radius guarantees (Cohen et al., 2019)
+  - Aggregation: (σ × M) tradeoff surface for multi-draw scenarios
+  - SNR analysis: Logit statistics, bi-Gaussian AUC prediction, dimensional advantage
 
-Runs on both MLP and LSTM models, producing the project's core
-privacy defense results and comparison plots.
+Runs on both MLP and LSTM models using GPU-accelerated pairwise distance
+computation (PyTorch CUDA) and vectorized rank-finding for re-identification.
 
 Outputs (to outputs/models/smoothing/):
-  - smoothing_results.json: All numerical results
-  - comparison/privacy_utility_tradeoff.png: Main deliverable
+  - smoothing_results_v2.json: All numerical results (dual utility, aggregation, logit stats)
+  - comparison/privacy_utility_tradeoff.png: Main deliverable (MC AUC + analytical + re-id lift)
+  - comparison/pareto_frontier.png: MC AUC (x) vs re-id lift (y) with aggregation curves
   - comparison/reid_decay.png: Re-id accuracy vs sigma
-  - comparison/auc_degradation.png: AUC vs sigma
+  - comparison/auc_degradation.png: Analytical vs MC single-draw vs MC M=10
   - comparison/certification_coverage.png: Certified fraction vs sigma
-  - comparison/smoothing_summary.png: 2x2 summary grid
+  - comparison/smoothing_summary.png: 2x2 summary grid with MC AUC
   - {model}/certified_radii.png: Radius distributions per model
-  - {model}/recommended_sigma_detail.png: Detail at recommended sigma
+  - {model}/recommended_sigma_detail.png: Detail at recommended sigma (MC evaluation)
+  - {model}/snr_analysis.png: Logit histograms, predicted vs observed AUC, noise sensitivity
+  - {model}/aggregation_surface.png: (σ × M) heatmap of AUC and re-id lift
 
 Usage:
     conda activate privacy
@@ -58,18 +63,18 @@ from models.attack import run_random_baseline
 # ======================================================================
 
 SIGMA_VALUES = [0.0, 0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0]
-N_REID_TRIALS = 10
-MC_UTILITY_TRIALS = 50
+N_REID_TRIALS = 20
+MC_UTILITY_TRIALS = 100
 REID_METRIC = "cosine"
-MC_N_SAMPLES = 1000
+MC_N_SAMPLES = 2000
 MC_ALPHA = 0.001
 MC_MAX_POINTS = 3000
 
 # Aggregation experiment (Scenario C)
 AGG_SIGMA_VALUES = [0.25, 0.5, 1.0, 2.0]
-AGG_M_VALUES = [1, 5, 10, 50]
-AGG_UTILITY_TRIALS = 20
-AGG_REID_TRIALS = 5
+AGG_M_VALUES = [1, 5, 10, 25, 50, 100]
+AGG_UTILITY_TRIALS = 30
+AGG_REID_TRIALS = 10
 
 MLP_DIR = PROJECT_ROOT / "outputs" / "models" / "mlp_baseline"
 LSTM_DIR = PROJECT_ROOT / "outputs" / "models" / "lstm"

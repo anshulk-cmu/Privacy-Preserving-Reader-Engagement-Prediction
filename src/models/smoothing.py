@@ -43,7 +43,7 @@ from sklearn.metrics import (
     recall_score,
     average_precision_score,
 )
-from sklearn.metrics import pairwise_distances
+from models.attack import _gpu_pairwise_distances
 
 
 # ---------------------------------------------------------------------------
@@ -266,7 +266,7 @@ def compute_nn_distances(
 
     def _compute_for_metric(m: str) -> dict:
         start = time.time()
-        dists = pairwise_distances(profiles, metric=m)
+        dists = _gpu_pairwise_distances(profiles, metric=m)
         np.fill_diagonal(dists, np.inf)
         nn_dists = dists.min(axis=1)
         elapsed = time.time() - start

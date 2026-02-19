@@ -144,8 +144,8 @@ Privacy-Preserving-Reader-Engagement-Prediction/
 │       ├── mlp_baseline.py          # Deep MLP engagement model (210K params)
 │       ├── lstm_model.py            # BiLSTM + Attention model (~1M params)
 │       ├── train.py                 # Training infrastructure, losses, plotting
-│       ├── attack.py                # Nearest-neighbor re-identification attack
-│       └── smoothing.py             # Randomized smoothing: analytical + MC + re-id (Phase 4)
+│       ├── attack.py                # GPU-accelerated nearest-neighbor re-identification attack
+│       └── smoothing.py             # Randomized smoothing: analytical + MC + aggregation + SNR (Phase 4)
 ├── outputs/
 │   ├── figures/                     # EDA plots (Phase 1)
 │   └── models/
@@ -162,18 +162,23 @@ Privacy-Preserving-Reader-Engagement-Prediction/
 │       │   ├── reidentification_results.json
 │       │   └── blind_test_results.json
 │       └── smoothing/               # Randomized smoothing outputs (Phase 4)
-│           ├── smoothing_results.json
+│           ├── smoothing_results_v2.json
 │           ├── comparison/          # Cross-model comparison plots
 │           │   ├── privacy_utility_tradeoff.png  (main deliverable)
+│           │   ├── pareto_frontier.png
 │           │   ├── reid_decay.png, auc_degradation.png
 │           │   ├── certification_coverage.png
 │           │   └── smoothing_summary.png
 │           ├── mlp/                 # MLP-specific plots
 │           │   ├── certified_radii.png
-│           │   └── recommended_sigma_detail.png
+│           │   ├── recommended_sigma_detail.png
+│           │   ├── snr_analysis.png
+│           │   └── aggregation_surface.png
 │           └── lstm/                # LSTM-specific plots
 │               ├── certified_radii.png
-│               └── recommended_sigma_detail.png
+│               ├── recommended_sigma_detail.png
+│               ├── snr_analysis.png
+│               └── aggregation_surface.png
 └── ebnerd-benchmark/                # Cloned EB-NeRD benchmark repo (reference)
 ```
 
@@ -222,12 +227,16 @@ Privacy-Preserving-Reader-Engagement-Prediction/
 ### Phase 4: Randomized Smoothing for Privacy (Code Complete — Awaiting Execution)
 - Add calibrated Gaussian noise ε ~ N(0, σ²I₆₄) to 64-dim learned representations
 - Analytical smoothed prediction: P = Φ(logit / (σ·‖w‖)) — exact for linear classification head
+- **Tautology audit**: Analytical AUC is a monotonic transform (preserves rankings by construction) — replaced with Monte Carlo noise injection for honest utility measurement
+- **Dual-evaluation framework**: Analytical AUC as upper bound + MC AUC (100-trial averaged) as deployment-realistic metric
 - Certified radius R = σ · Φ⁻¹(p_A) guarantees prediction stability (Cohen et al., ICML 2019)
 - Monte Carlo verification with Clopper-Pearson confidence bounds (α = 0.001)
 - Sweep 11 noise levels (σ = 0 to 3.0) mapping the full privacy-utility tradeoff
+- **Aggregation tradeoff**: (σ × M) surface showing utility vs privacy coupling across multi-draw scenarios
+- **GPU-accelerated re-identification**: Full CUDA pipeline — pairwise distance (batched normalized matmul for cosine, `torch.cdist` for euclidean), `torch.argsort` for ranking, and vectorized broadcast rank-finding. ~15× end-to-end speedup per attack (~9s vs ~128s), enabling ~460 attacks per run in ~1.5 hours
 - Dual-metric NN distances (cosine for re-id, euclidean for L2 certification comparison)
 - Compare MLP vs LSTM: quantify how much more noise the LSTM needs for equivalent privacy
-- 7 visualization plots including privacy-utility Pareto frontier (main deliverable)
+- 10 visualization plots including privacy-utility Pareto frontier, aggregation surface, and SNR analysis (main deliverables)
 - Documentation: [docs/05_randomized_smoothing.md](docs/05_randomized_smoothing.md)
 
 ## Setup

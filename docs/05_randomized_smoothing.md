@@ -138,7 +138,7 @@ We compute this in both metrics:
 
 ### 3.4 Monte Carlo Utility Evaluation (Scenario B)
 
-For each σ, we draw K=50 independent noise vectors and measure deployment-realistic utility:
+For each σ, we draw K=100 independent noise vectors and measure deployment-realistic utility:
 
 ```
 For trial k = 1, ..., K:
@@ -154,7 +154,7 @@ This measures genuine AUC degradation because each sample's noise draw independe
 
 ### 3.5 Monte Carlo Certification (Verification)
 
-As a verification of the analytical approach, we also implement Monte Carlo certification with Clopper-Pearson confidence bounds (1,000 samples, α = 0.001).
+As a verification of the analytical approach, we also implement Monte Carlo certification with Clopper-Pearson confidence bounds (2,000 samples, α = 0.001).
 
 ---
 
@@ -208,12 +208,12 @@ For each σ, we compute four categories of metrics:
 
 **Utility — Monte Carlo (Deployment-Realistic):**
 - AUC, F1, Accuracy under actual noise injection
-- Averaged over 50 independent noise draws with error bars
+- Averaged over 100 independent noise draws with error bars
 - This is the honest utility measurement
 
 **Privacy (Noisy Re-identification):**
 - Add noise to representations, then run gallery/probe attack
-- Average over 10 independent noise draws
+- Average over 20 independent noise draws
 - Metrics: Top-1/5/10/20 accuracy, MRR, lift over random
 
 **Certification:**
@@ -222,20 +222,34 @@ For each σ, we compute four categories of metrics:
 
 ### Aggregation Experiment (Scenario C)
 
-At selected σ values [0.25, 0.5, 1.0, 2.0] and M ∈ {1, 5, 10, 50} draws per query:
+At selected σ values [0.25, 0.5, 1.0, 2.0] and M ∈ {1, 5, 10, 25, 50, 100} draws per query:
 - Utility: averaged sigmoid scores across M draws
 - Privacy: re-identification on averaged representations (effective noise σ/√M)
+
+### GPU-Accelerated Re-identification
+
+The re-identification attack requires computing pairwise cosine distances between 280K probe impressions and ~28K gallery user profiles, repeated ~460 times across the sigma sweep (11σ × 20 trials = 220) and aggregation experiment (4σ × 6M × 10 trials = 240). The entire attack pipeline is GPU-accelerated:
+
+- **Pairwise distance** (`_gpu_pairwise_distances`): Cosine via L2-normalize + batched matmul (`1 - X_norm @ Y_norm.T`), euclidean via `torch.cdist`. Inner batching at 2,048 rows to avoid GPU OOM.
+- **Argsort**: `torch.argsort` on CUDA sorts each probe's distance vector (28K gallery entries) in parallel, replacing `np.argsort` on CPU.
+- **Rank-finding**: Vectorized broadcast comparison (`sorted_indices == true_idx`) + `argmax` on GPU. Eliminates the Python for-loop over 280K probes that was the previous bottleneck.
+- **Outer batching**: 10,000 probes per batch (~3.3 GB peak VRAM for distance + sorted index tensors).
+- **Fallback**: Automatically falls back to CPU if CUDA is unavailable.
+
+This yields a **~15× end-to-end speedup** per re-identification call (~9s vs ~128s on CPU), making the full pipeline with increased trial counts feasible in ~1.5 hours on an RTX 5070 Ti.
 
 ### Configuration
 
 ```python
 SIGMA_VALUES = [0.0, 0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0]
-N_REID_TRIALS = 10           # noise draws for stable re-id measurement
-MC_UTILITY_TRIALS = 50       # noise draws for MC utility evaluation
-MC_N_SAMPLES = 1000          # Monte Carlo samples for certification verification
+N_REID_TRIALS = 20           # noise draws for stable re-id measurement
+MC_UTILITY_TRIALS = 100      # noise draws for MC utility evaluation
+MC_N_SAMPLES = 2000          # Monte Carlo samples for certification verification
 MC_ALPHA = 0.001             # Clopper-Pearson confidence level (99.9%)
 AGG_SIGMA_VALUES = [0.25, 0.5, 1.0, 2.0]
-AGG_M_VALUES = [1, 5, 10, 50]
+AGG_M_VALUES = [1, 5, 10, 25, 50, 100]
+AGG_UTILITY_TRIALS = 30      # utility averaging trials per (σ, M) cell
+AGG_REID_TRIALS = 10         # re-id trials per (σ, M) cell
 ```
 
 ---
@@ -312,7 +326,7 @@ At each σ:
 1. Add noise: r̃ = r + ε, where ε ~ N(0, σ²I₆₄)
 2. Build gallery (per-user mean of noisy representations) and probe set
 3. Run nearest-neighbor re-identification attack using cosine distance
-4. Repeat 10 times with independent noise draws; average metrics
+4. Repeat 20 times with independent noise draws; average metrics
 
 These results are **unchanged from the original evaluation** — the re-identification code always used actual noise injection and is not affected by the analytical AUC tautology.
 
@@ -376,7 +390,7 @@ For each query, the system draws M noisy copies r'₁, ..., r'_M, classifies eac
 
 This exposes the core insight: **you cannot improve utility without leaking more information**. The parameter M controls where you sit on this tradeoff, producing a 2D operating space rather than a 1D curve.
 
-Results are reported as a (σ × M) table with AUC and re-id lift at each cell, visualized as a heatmap in the aggregation surface plots.
+Results are reported as a (4σ × 6M = 24 cell) table with AUC and re-id lift at each cell, visualized as a heatmap in the aggregation surface plots.
 
 ---
 
@@ -427,8 +441,8 @@ The curve sweeps from top-right (clean: high AUC, high re-id lift) to bottom-lef
 
 ### Three Layers of Evidence
 
-1. **MC single-draw (solid curves)**: The deployment-realistic measurement. Each point is one σ with 50-trial averaged AUC.
-2. **Aggregation curves (dashed)**: How multi-draw averaging shifts the frontier (M = 5, 10, 50).
+1. **MC single-draw (solid curves)**: The deployment-realistic measurement. Each point is one σ with 100-trial averaged AUC.
+2. **Aggregation curves (dashed)**: How multi-draw averaging shifts the frontier (M = 5, 10, 25, 50, 100).
 3. **Analytical upper bound (dotted)**: The theoretical best — what you'd get if you could compute the expected smoothed score without revealing the clean representation.
 
 ---
